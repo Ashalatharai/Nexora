@@ -288,5 +288,77 @@ class KiranaChatAPITestCase(unittest.TestCase):
         self.assertTrue(data["clarification_needed"])
         self.assertIn("Which product", data["reply"])
 
+    def test_16_create_new_customer_ramesh(self):
+        """
+        Verify new customer creation:
+        'Add new customer Ramesh'
+        - Recognizes customer-registration intent
+        - Saves customer 'Ramesh' in the database
+        - Appears in customer list
+        """
+        payload = {"message": "Add new customer Ramesh", "session_id": "test_sess"}
+        response = self.client.post("/api/chat", json=payload)
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertEqual(data["action_taken"], "create_customer")
+        self.assertIn("Ramesh", data["reply"])
+        self.assertIn("successfully added", data["reply"])
+
+        # Customer must appear in customer list
+        customers = data["store_state"]["customers"]
+        ramesh = next((c for c in customers if c["name"] == "Ramesh"), None)
+        self.assertIsNotNone(ramesh)
+        self.assertEqual(ramesh["due"], 0.0)
+
+    def test_17_prevent_duplicate_customer_creation(self):
+        """
+        Verify duplicate customer prevention:
+        Typing 'Add new customer Ramesh' again must NOT create a duplicate.
+        """
+        # Count current customers
+        state_before = self.client.get("/api/store/state").json()
+        count_before = len([c for c in state_before["customers"] if c["name"] == "Ramesh"])
+        self.assertEqual(count_before, 1)
+
+        payload = {"message": "Add new customer Ramesh", "session_id": "test_sess"}
+        response = self.client.post("/api/chat", json=payload)
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertEqual(data["action_taken"], "none")
+        self.assertIn("already exists", data["reply"])
+        self.assertIn("No duplicate was created", data["reply"])
+
+        # Count must remain 1
+        state_after = self.client.get("/api/store/state").json()
+        count_after = len([c for c in state_after["customers"] if c["name"] == "Ramesh"])
+        self.assertEqual(count_after, 1)
+
+    def test_18_create_customer_with_phone(self):
+        """Verify new customer registration with phone: 'Add new customer Suresh with phone 9876543210'."""
+        payload = {"message": "Add new customer Suresh with phone 9876543210", "session_id": "test_sess"}
+        response = self.client.post("/api/chat", json=payload)
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertEqual(data["action_taken"], "create_customer")
+        self.assertIn("Suresh", data["reply"])
+        self.assertIn("9876543210", data["reply"])
+
+        customers = data["store_state"]["customers"]
+        suresh = next((c for c in customers if c["name"] == "Suresh"), None)
+        self.assertIsNotNone(suresh)
+        self.assertEqual(suresh["phone"], "9876543210")
+
+    def test_19_transact_with_newly_created_customer(self):
+        """Verify newly created customer can immediately perform credit and sales transactions."""
+        payload = {"message": "Suresh took 1 milk on credit", "session_id": "test_sess"}
+        response = self.client.post("/api/chat", json=payload)
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertEqual(data["action_taken"], "credit")
+        self.assertIn("Suresh", data["reply"])
+
+        suresh = next(c for c in data["store_state"]["customers"] if c["name"] == "Suresh")
+        self.assertGreater(suresh["due"], 0)
+
 if __name__ == "__main__":
     unittest.main()

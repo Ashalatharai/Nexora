@@ -432,6 +432,25 @@ function Assistant() {
         reply = dueCust.length
           ? `You have ${dueCust.length} customer(s) with pending credit totaling ${money(dueCust.reduce((s, c) => s + c.due, 0))}. Top balance: ${dueCust[0].name} (${money(dueCust[0].due)}).`
           : "No customers have outstanding credit balances right now.";
+      } else if (/(add|create|register|new).*(customer|client)|(customer|client).*(add|create|register|new)/.test(lower) && !/(bought|buy|buys|sold|sell|sale|took|paid|payment|credit|udhaar)/.test(lower)) {
+        const nameMatch = text.match(/(?:add|create|register)?\s*(?:new\s+)?customer\s+([A-Za-z\s]+?)(?:[,\s]+(?:with\s+phone|phone|mobile|number|#)?[:\s]*(\+?\d[\d\s-]{7,}\d))?$/i);
+        const candName = nameMatch ? nameMatch[1].trim() : "";
+        const candPhone = nameMatch && nameMatch[2] ? nameMatch[2].trim() : "";
+        if (!candName) {
+          reply = "What is the new customer's name? Please specify their name (e.g. 'Add new customer Ramesh').";
+        } else {
+          const existing = data.customers.find(c => c.name.toLowerCase().trim() === candName.toLowerCase().trim());
+          if (existing) {
+            reply = `Customer '${existing.name}' already exists in your records. No duplicate was created.`;
+          } else {
+            const cid = `c${Date.now()}`;
+            const words = candName.split(" ");
+            const initials = words.map(w => w[0].toUpperCase()).slice(0, 2).join("") || "CU";
+            const newCust = { id: cid, name: candName, phone: candPhone, due: 0, lastActive: "Today", initials, color: "mint" };
+            setData(current => ({ ...current, customers: [...current.customers, newCust] }));
+            reply = `Customer '${candName}' has been successfully added to your records${candPhone ? ` (Phone: ${candPhone})` : ""}. They are now available for sales and Udhaar transactions.`;
+          }
+        }
       } else if (/(how much|how many|is left|check stock|in stock)/.test(lower)) {
         const found = data.products.find(p => lower.includes(p.name.toLowerCase().split(" ")[0]) || p.name.toLowerCase().split(" ").some(w => w.length >= 4 && lower.includes(w)));
         if (found) {

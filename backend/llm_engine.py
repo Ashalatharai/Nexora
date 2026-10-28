@@ -367,6 +367,30 @@ CRITICAL TRANSACTION RULES:
         return None, None
 
     @classmethod
+    def _extract_new_customer_details(cls, text: str) -> Tuple[Optional[str], Optional[str]]:
+        """
+        Extract customer name and optional phone from registration phrasing.
+        e.g. 'Add new customer Ramesh' -> ('Ramesh', '')
+        e.g. 'Add new customer Suresh with phone 9876543210' -> ('Suresh', '9876543210')
+        e.g. 'Add Rajesh as a new customer' -> ('Rajesh', '')
+        """
+        patterns = [
+            r'(?:add|create|register)\s+(?:new\s+)?customer\s+([A-Za-z\s]+?)(?:[,\s]+(?:with\s+phone|phone|mobile|number|#)?[:\s]*(\+?\d[\d\s-]{7,}\d))?$',
+            r'new\s+customer\s+([A-Za-z\s]+?)(?:[,\s]+(?:with\s+phone|phone|mobile|number|#)?[:\s]*(\+?\d[\d\s-]{7,}\d))?$',
+            r'(?:add|create|register)\s+([A-Za-z\s]+?)\s+as\s+(?:a\s+)?(?:new\s+)?customer(?:[,\s]+(?:with\s+phone|phone|mobile|number)?[:\s]*(\+?\d[\d\s-]{7,}\d))?$'
+        ]
+        clean_text = text.strip()
+        for pat in patterns:
+            m = re.search(pat, clean_text, re.IGNORECASE)
+            if m:
+                name = m.group(1).strip()
+                phone = m.group(2).strip() if m.group(2) else ""
+                name = re.sub(r"[^\w\s]", "", name).strip()
+                if len(name) >= 2:
+                    return name, phone
+        return None, None
+
+    @classmethod
     def _extract_product_info(cls, cursor, text: str, customer_name: str = None) -> Tuple[Optional[dict], str]:
         """Identify matched product dict and candidate product query string."""
         matched_p = match_product(cursor, text)
@@ -499,7 +523,40 @@ CRITICAL TRANSACTION RULES:
                 }
 
         # ---------------------------------------------------------------------
-        # 7. Action: STOCK ADDITIONS / RESTOCK
+        # 7. Action: CUSTOMER REGISTRATION
+        # e.g. "Add new customer Ramesh", "Add customer Priya", "New customer Suresh"
+        # ---------------------------------------------------------------------
+        is_customer_registration = bool(
+            re.search(r"\b(add|create|register|new)\b.*\b(customer|client)\b", lower) or
+            re.search(r"\b(customer|client)\b.*\b(add|create|register|new)\b", lower)
+        ) and not re.search(r"\b(bought|buy|buys|sold|sell|sale|took|paid|payment|credit|udhaar)\b", lower)
+
+        if is_customer_registration:
+            new_name, new_phone = cls._extract_new_customer_details(raw)
+            if not new_name:
+                return {
+                    "reply": "What is the new customer's name? Please specify their name (e.g. 'Add new customer Ramesh').",
+                    "action_taken": "none",
+                    "clarification_needed": True
+                }
+
+            res = RuleParser.execute_create_customer(new_name, new_phone, raw)
+            if res["success"]:
+                phone_txt = f" (Phone: {res['phone']})" if res.get("phone") else ""
+                return {
+                    "reply": f"Customer '{res['customer_name']}' has been successfully added to your records{phone_txt}. They are now available for sales and Udhaar transactions.",
+                    "action_taken": "create_customer",
+                    "action_details": res,
+                    "clarification_needed": False
+                }
+            return {
+                "reply": res["error"],
+                "action_taken": "none",
+                "clarification_needed": False
+            }
+
+        # ---------------------------------------------------------------------
+        # 8. Action: STOCK ADDITIONS / RESTOCK
         # e.g. "Add 10 Maggi packets to stock", "Received 15 Tata Salt in stock", "Restock 20 milk"
         # Rule: Do not interpret customer buying a product as stock addition!
         # ---------------------------------------------------------------------
