@@ -5,7 +5,7 @@ from fastapi.responses import RedirectResponse
 
 from app.config import APP_TITLE, APP_DESCRIPTION, APP_VERSION, CORS_ORIGINS
 from app.database import init_db
-from app.routers import health, inventory, credit, alerts, summary, chat
+from app.routers import health, inventory, credit, alerts, summary, chat, parser
 
 
 @asynccontextmanager
@@ -13,7 +13,6 @@ async def lifespan(app: FastAPI):
     # Startup: ensure tables exist and seed baseline inventory if empty
     init_db(seed=True)
     yield
-    # Shutdown logic (if any)
 
 
 app = FastAPI(
@@ -41,6 +40,7 @@ app.include_router(credit.router, prefix="/api")
 app.include_router(alerts.router, prefix="/api")
 app.include_router(summary.router, prefix="/api")
 app.include_router(chat.router, prefix="/api")
+app.include_router(parser.router, prefix="/api")
 
 
 @app.get("/", include_in_schema=False)

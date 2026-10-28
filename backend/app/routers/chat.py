@@ -21,7 +21,7 @@ from app.schemas.credit import (
 )
 from app.services.inventory_service import InventoryService, format_qty
 from app.services.credit_service import CreditService
-from app.services.parser_service import MessageParserFallback
+from app.parser import KiranaMessageParser
 
 router = APIRouter(prefix="/chat", tags=["Conversational Chat"])
 
@@ -45,7 +45,16 @@ def process_chat_message(request: ChatRequest, db: Session = Depends(get_db)):
         intent = "inventory" if first_domain == "inventory" else "credit"
     elif request.message:
         # 2. Fall back to internal decoupled message parser
-        actions, intent = MessageParserFallback.parse_message(request.message)
+        parse_res = KiranaMessageParser.parse(request.message)
+        if not parse_res.success:
+            return ChatResponse(
+                success=False,
+                reply=parse_res.clarification_prompt or "I couldn't understand that command.",
+                intent=parse_res.intent,
+                parsed_actions=[]
+            )
+        actions = parse_res.actions
+        intent = parse_res.intent
 
     if not actions:
         return ChatResponse(
@@ -169,9 +178,9 @@ def process_chat_message(request: ChatRequest, db: Session = Depends(get_db)):
         raw_act = act.action.lower()
         if raw_act in ["sold", "sell", "sale"]:
             enum_act = InventoryAction.SOLD
-        elif raw_act in ["received", "receive", "bought", "purchased"]:
+        elif raw_act in ["received", "receive", "bought", "purchased", "added"]:
             enum_act = InventoryAction.RECEIVED
-        elif raw_act in ["damaged", "damage", "waste"]:
+        elif raw_act in ["damaged", "damage", "waste", "expired", "broken"]:
             enum_act = InventoryAction.DAMAGED
         elif raw_act in ["returned", "return"]:
             enum_act = InventoryAction.RETURNED
