@@ -23,6 +23,8 @@ node_modules/
 dist/
 build/
 .next/
+.env*
+!.env.example
 
 # OS / Editor
 .DS_Store

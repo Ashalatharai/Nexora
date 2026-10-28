@@ -1,87 +1,89 @@
-# Kirana Chat Ledger
+# Kirana Chat Ledger — Byte Race 2026
 
-A chat-based inventory and credit management system designed for small kirana stores.
+A modern, chat-driven inventory and credit management system designed specifically for small Indian retail shopkeepers (kirana stores).
 
-## Problem Statement
+Kirana stores need fast, effortless record-keeping during busy store hours. Kirana Chat Ledger allows shopkeepers to record inventory operations and customer Udhaar through natural language messages (or typed/voice input) with zero tedious form-filling.
 
-Small retail shopkeepers often manage inventory, daily sales, stock receipts, damaged goods, and customer credit manually. This makes stock tracking and credit management difficult.
+---
 
-## Proposed Solution
+## System Architecture
 
-Kirana Chat Ledger allows shopkeepers to record inventory operations and customer credit through simple, natural-language messages.
+* **Frontend:** React 18, Vite 6, Tailwind CSS, Lucide Icons, React Router v6.
+* **Backend:** Python 3.10+, FastAPI, Uvicorn, SQLAlchemy, SQLite (ACID compliant with atomic batch rollbacks & idempotency).
+* **Message Parser:** Deterministic 4-phase NLP parsing engine (Normalization, Intent Matching, Entity Extraction, Ambiguity Resolution) supporting Hinglish/English retail vocabulary.
 
-## Core Features
+---
 
-* Natural-language inventory updates
-* Multiple products in a single message
-* Stock tracking for sales, receipts, damage, and returns
-* Low-stock and out-of-stock alerts
-* Customer credit (Udhaar) management with audit trail
-* Daily sales and inventory summaries with gross sales revenue calculation
-* Supplier reorder messages with direct WhatsApp click-to-chat links
-* Persistent SQLite database storage with idempotency safeguards
-* Transaction reversal with compensating audit records
+## Core Capabilities
 
-## Technology Stack
+1. **Natural-Language Inventory Updates:**
+   - Multi-item batch sales (e.g. `"sold 3 maggi, 2 milk"`).
+   - Stock receipts (e.g. `"received 20 rice bags"`).
+   - Damaged item write-offs and customer restock returns.
+2. **Customer Udhaar (Credit) Management:**
+   - Record credit sales directly (e.g. `"Ramesh took 2 rice on credit"`).
+   - Record debt repayments (e.g. `"Ramesh paid ₹200"`).
+   - Strict audit trails and rejection of overpayments exceeding outstanding dues.
+3. **Automated Inventory Alerts & Reorders:**
+   - Immediate detection of `LOW_STOCK` and `OUT_OF_STOCK` conditions.
+   - 1-click WhatsApp supplier reorder draft generation.
+4. **Daily Ledger & Cash Summaries:**
+   - End-of-day revenue, payments received, credit extended, and stock movement breakdown.
+5. **Interactive Dashboard & Assistant:**
+   - Clean, mobile-friendly shopkeeper interface with quick suggestions and voice-ready interaction.
 
-* Frontend: React and Tailwind CSS
-* Backend: Python and FastAPI
-* Database: SQLite and SQLAlchemy
-* Message Parsing: Rule-based parsing and regular expressions
+---
 
-## Team
+## Quickstart & Local Setup
 
-Four-member team participating in Byte Race 2026.
+### 1. Prerequisites
+* **Python 3.10+**
+* **Node.js 18+** and **npm**
 
-## Inventory & Credit Policies
-
-1. **Returns Policy:**
-   * `returned`: Used for customer returns where items are inspected, verified sellable, and restocked into active inventory (`+quantity`).
-   * `damaged`: Used when goods are received damaged or customer-returned goods cannot be resold (`-quantity`).
-2. **Customer Udhaar Integrity:**
-   * Customer balances are maintained in synchronization with immutable credit ledger records. Every opening balance, purchase, and payment produces an auditable transaction.
-   * Overpayments exceeding the outstanding debt are strictly rejected.
-3. **Idempotency Safeguard:**
-   * All inventory and credit endpoints accept an optional `idempotency_key` to prevent accidental double-billing or double-deduction on mobile network retries.
-
-## Setup & Running the Backend
-
-### Prerequisites
-* Python 3.10+
-* pip
-
-### Installation
-
-1. Navigate to the `backend` folder:
+### 2. Backend Setup
+1. Navigate to the `backend` directory:
    ```bash
    cd backend
    ```
-
-2. Install dependencies:
+2. Install Python dependencies:
    ```bash
    pip install -r requirements.txt
    ```
+3. Run the backend development server:
+   ```bash
+   python run.py
+   ```
+   The backend API will be running at **`http://127.0.0.1:8000`**.
+   * **Swagger UI Documentation:** [http://127.0.0.1:8000/docs](http://127.0.0.1:8000/docs)
+   * **ReDoc Documentation:** [http://127.0.0.1:8000/redoc](http://127.0.0.1:8000/redoc)
 
-### Starting the Server
+### 3. Frontend Setup
+1. In the repository root:
+   ```bash
+   npm install
+   ```
+2. Start the Vite development server:
+   ```bash
+   npm run dev
+   ```
+   The application dashboard will be live at **`http://localhost:5173`**.
 
-Run the development server:
+---
+
+## Running Automated Tests
+
+### Backend Test Suite
+Run all 51 automated unit and integration tests (covering inventory, credit integrity, alerts, daily summaries, parser phases, and SQLite persistence):
 ```bash
-python run.py
+python -m pytest backend/tests -v
 ```
-Or with Uvicorn directly:
+
+### Frontend Production Build
 ```bash
-uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
+npm run build
 ```
 
-* **Interactive API Documentation (Swagger UI):** [http://127.0.0.1:8000/docs](http://127.0.0.1:8000/docs)
-* **Alternative API Documentation (ReDoc):** [http://127.0.0.1:8000/redoc](http://127.0.0.1:8000/redoc)
-
-### Running Automated Tests
-
-Run the complete test suite (33 tests covering inventory, credit, alerts, chat, reversal, and persistence):
-```bash
-pytest -v
-```
+---
 
 ## API Specification
 
@@ -92,10 +94,11 @@ pytest -v
 | `POST` | `/api/inventory/transaction` | Atomically apply batch actions (`sold`, `received`, `damaged`, `returned`) |
 | `POST` | `/api/inventory/transaction/{id}/reverse` | Auditably reverse an erroneous transaction with a compensating entry |
 | `POST` | `/api/inventory/item` | Add new item or configure minimum stock threshold |
-| `GET` | `/api/alerts/low-stock` | Retrieve items requiring reordering (categorized as OUT_OF_STOCK vs LOW_STOCK) |
+| `GET` | `/api/alerts/low-stock` | Retrieve items requiring reordering (`OUT_OF_STOCK` vs `LOW_STOCK`) |
 | `GET` | `/api/summary/daily` | End-of-day sales revenue in INR, receipts, damages, and credit cash-flows |
 | `GET` | `/api/credit/customers` | Customer Udhaar balances |
 | `POST` | `/api/credit/transaction` | Record credit purchase or payment |
 | `GET` | `/api/credit/customers/{name}/verify` | Audit and verify customer balance consistency against transaction history |
 | `GET` | `/api/supplier/reorder` | Generate supplier order draft and WhatsApp click-to-chat URL |
 | `POST` | `/api/chat` | Unified chat endpoint (structured actions or raw natural language) |
+| `POST` | `/api/parser/parse` | Direct parser endpoint for tokenization, intent recognition, and entities |
