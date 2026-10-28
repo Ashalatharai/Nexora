@@ -204,7 +204,19 @@ Shop name: Sharma General Store.
 
 You must respond in JSON with the exact structure:
 {{
-  "intent": "SALE" | "RESTOCK" | "CREDIT" | "PAYMENT" | "CREATE_CUSTOMER" | "QUERY" | "CLARIFICATION" | "GENERAL",
+  "intent": "SALE" | "RESTOCK" | "CREDIT" | "PAYMENT" | "CREATE_CUSTOMER" | "MULTI" | "QUERY" | "CLARIFICATION" | "GENERAL",
+  "actions": [
+    {{
+      "intent": "SALE" | "RESTOCK" | "CREDIT" | "PAYMENT" | "CREATE_CUSTOMER",
+      "action_params": {{
+        "product_name": string or null,
+        "quantity": integer or null,
+        "customer_name": string or null,
+        "phone": string or null,
+        "amount": float or null
+      }}
+    }}
+  ],
   "action_params": {{
     "product_name": string or null,
     "quantity": integer or null,
@@ -233,17 +245,17 @@ CRITICAL TRANSACTION RULES:
    - Set intent="PAYMENT". action_params must have customer_name and amount.
 5. When a new customer is registered (e.g. "Add new customer Ramesh"):
    - Set intent="CREATE_CUSTOMER". action_params must have customer_name and optional phone.
-6. If the transaction direction is ambiguous (e.g. "Deeksha took 2 Maggi" without specifying cash or credit):
+6. When a prompt contains multiple ledger actions (e.g. "sold maggie 2 packets and received 2 tata salt packets", "Sold 3 Maggi, 2 milk"):
+   - Set intent="MULTI" and list each operation in the "actions" array.
+7. If the transaction direction is ambiguous (e.g. "Deeksha took 2 Maggi" without specifying cash or credit):
    - Set intent="CLARIFICATION", ask: "Did Deeksha pay cash or take 2 Maggi on credit?"
-7. Never fabricate numbers. Live execution and stock validation will be enforced by the backend RuleParser.
+8. Never fabricate numbers. Live execution and stock validation will be enforced by the backend RuleParser.
 """
 
     @classmethod
-    def _handle_llm_action_and_response(cls, parsed: Dict[str, Any], raw_query: str) -> Dict[str, Any]:
-        """Validates and executes database write actions identified by LLM."""
-        intent = (parsed.get("intent") or "GENERAL").upper()
-        params = parsed.get("action_params") or {}
-        llm_reply = parsed.get("reply", "")
+    def _execute_single_intent(cls, intent: str, params: Dict[str, Any], raw_query: str) -> Optional[Dict[str, Any]]:
+        """Executes a single intent against RuleParser."""
+        intent = (intent or "GENERAL").upper()
 
         # 1. SALE
         if intent == "SALE" and params.get("product_name"):
@@ -259,8 +271,7 @@ CRITICAL TRANSACTION RULES:
                 if res.get("warning"):
                     reply += f" ⚠️ {res['warning']}"
                 return {"reply": reply, "action_taken": "sale", "action_details": res, "clarification_needed": False}
-            else:
-                return {"reply": res["error"], "action_taken": "none", "clarification_needed": res.get("clarification_needed", False)}
+            return {"reply": res["error"], "action_taken": "none", "clarification_needed": res.get("clarification_needed", False)}
 
         # 2. RESTOCK
         if intent == "RESTOCK" and params.get("product_name"):
@@ -272,8 +283,7 @@ CRITICAL TRANSACTION RULES:
             if res["success"]:
                 reply = f"Stock updated! Added {res['quantity_added']} {res['unit']}(s) to {res['product_name']}. New inventory count: {res['new_stock']}."
                 return {"reply": reply, "action_taken": "restock", "action_details": res, "clarification_needed": False}
-            else:
-                return {"reply": res["error"], "action_taken": "none", "clarification_needed": res.get("clarification_needed", False)}
+            return {"reply": res["error"], "action_taken": "none", "clarification_needed": res.get("clarification_needed", False)}
 
         # 3. CREDIT
         if intent == "CREDIT" and params.get("customer_name"):
@@ -288,8 +298,7 @@ CRITICAL TRANSACTION RULES:
                 item_info = f" for {res['quantity']} {res['product_name']}" if res.get("product_name") else ""
                 reply = f"Recorded ₹{res['amount_added']:0.2f} on credit for {res['customer_name']}{item_info}. Their total Udhaar is now ₹{res['new_due_balance']:0.2f}."
                 return {"reply": reply, "action_taken": "credit", "action_details": res, "clarification_needed": False}
-            else:
-                return {"reply": res["error"], "action_taken": "none", "clarification_needed": res.get("clarification_needed", False)}
+            return {"reply": res["error"], "action_taken": "none", "clarification_needed": res.get("clarification_needed", False)}
 
         # 4. PAYMENT
         if intent == "PAYMENT" and params.get("customer_name") and params.get("amount"):
@@ -301,8 +310,7 @@ CRITICAL TRANSACTION RULES:
             if res["success"]:
                 reply = f"Payment noted! {res['customer_name']} paid ₹{res['amount_paid']:0.2f}. Remaining balance: ₹{res['new_due']:0.2f}."
                 return {"reply": reply, "action_taken": "payment", "action_details": res, "clarification_needed": False}
-            else:
-                return {"reply": res["error"], "action_taken": "none", "clarification_needed": res.get("clarification_needed", False)}
+            return {"reply": res["error"], "action_taken": "none", "clarification_needed": res.get("clarification_needed", False)}
 
         # 5. CREATE_CUSTOMER
         if intent == "CREATE_CUSTOMER" and params.get("customer_name"):
@@ -315,10 +323,37 @@ CRITICAL TRANSACTION RULES:
                 phone_txt = f" (Phone: {res['phone']})" if res.get("phone") else ""
                 reply = f"Customer '{res['customer_name']}' has been successfully added to your records{phone_txt}. They are now available for sales and Udhaar transactions."
                 return {"reply": reply, "action_taken": "create_customer", "action_details": res, "clarification_needed": False}
-            else:
-                return {"reply": res["error"], "action_taken": "none", "clarification_needed": res.get("clarification_needed", False)}
+            return {"reply": res["error"], "action_taken": "none", "clarification_needed": res.get("clarification_needed", False)}
 
-        # 6. Queries, greetings, clarifications
+        return None
+
+    @classmethod
+    def _handle_llm_action_and_response(cls, parsed: Dict[str, Any], raw_query: str) -> Dict[str, Any]:
+        """Validates and executes database write actions identified by LLM."""
+        intent = (parsed.get("intent") or "GENERAL").upper()
+        actions = parsed.get("actions", [])
+
+        # Handle multiple actions if present
+        if (intent == "MULTI" or actions) and len(actions) > 0:
+            sub_results = []
+            for act in actions:
+                res = cls._execute_single_intent(act.get("intent", ""), act.get("action_params", {}), raw_query)
+                if res:
+                    sub_results.append(res)
+            if sub_results:
+                combined_lines = [f"{i+1}. {r['reply']}" for i, r in enumerate(sub_results)]
+                return {
+                    "reply": "Updated records:\n" + "\n".join(combined_lines),
+                    "action_taken": "multi",
+                    "action_details": {"sub_results": [r.get("action_details") for r in sub_results]},
+                    "clarification_needed": any(r.get("clarification_needed") for r in sub_results)
+                }
+
+        single_res = cls._execute_single_intent(intent, parsed.get("action_params") or {}, raw_query)
+        if single_res:
+            return single_res
+
+        llm_reply = parsed.get("reply", "")
         return {
             "reply": llm_reply or "I'm here to help manage your shop. Ask me anything about stock, sales, customers, or record transactions.",
             "action_taken": "query" if intent == "QUERY" else "none",
@@ -407,10 +442,137 @@ CRITICAL TRANSACTION RULES:
         return None, ""
 
     @classmethod
+    def _split_and_normalize_compound(cls, raw: str, cursor) -> List[str]:
+        """
+        Detects and splits multi-action compound sentences into atomic sub-commands.
+        Handles:
+        - Mixed actions: 'sold maggie 2 packets and received 2 tata salt packets'
+        - Shared actions: 'Sold 3 Maggi, 2 milk' -> ['Sold 3 Maggi', 'Sold 2 milk']
+        - Shared restock: 'Add 10 Maggi packets and 5 Tata salt to stock'
+        - Shared credit: 'Deeksha took 2 Maggi and 1 milk on credit'
+        - Credit + payment: 'Ramesh took 2 milk on credit and paid 100'
+        """
+        chunks = [c.strip() for c in re.split(r"\s*(?:,\s*and|\band\s+also|\band|\balso|;|,)\s*", raw, flags=re.IGNORECASE) if c.strip()]
+        if len(chunks) <= 1:
+            return [raw]
+
+        lower_full = raw.lower()
+        has_restock_keyword = bool(re.search(r"\b(to stock|in stock|into stock|inventory|restock)\b", lower_full))
+        has_credit_keyword = bool(re.search(r"\b(on credit|credit|udhaar)\b", lower_full))
+        has_sale_keyword = bool(re.search(r"\b(sold|sell|sale|bought|buy|buys|purchased)\b", lower_full))
+
+        matched_c = match_customer(cursor, raw)
+        global_cust_name = matched_c["name"] if matched_c else None
+
+        # Check if at least two chunks contain an action verb or product
+        action_or_prod_count = 0
+        for chunk in chunks:
+            c_lower = chunk.lower()
+            if (
+                re.search(r"\b(sold|sell|sale|bought|buy|buys|purchased|received|add|added|restock|paid|payment|credit|udhaar|took)\b", c_lower)
+                or match_product(cursor, chunk) is not None
+            ):
+                action_or_prod_count += 1
+
+        if action_or_prod_count < 2:
+            return [raw]
+
+        normalized_chunks = []
+        current_action = None
+        if has_restock_keyword:
+            current_action = "restock"
+        elif has_credit_keyword:
+            current_action = "credit"
+        elif has_sale_keyword:
+            current_action = "sale"
+
+        for i, chunk in enumerate(chunks):
+            c_lower = chunk.lower()
+
+            chunk_has_sale = bool(re.search(r"\b(sold|sell|sale|bought|buy|buys|purchased)\b", c_lower))
+            chunk_has_restock = bool(re.search(r"\b(add|added|received|restock)\b", c_lower) and not chunk_has_sale)
+            chunk_has_credit = bool(re.search(r"\b(on credit|credit|udhaar)\b", c_lower))
+            chunk_has_payment = bool(re.search(r"\b(paid|payment|settled)\b", c_lower))
+
+            chunk_p = match_product(cursor, chunk)
+            chunk_c = match_customer(cursor, chunk)
+            cust_to_use = chunk_c["name"] if chunk_c else global_cust_name
+
+            if chunk_has_sale:
+                normalized_chunks.append(chunk)
+                current_action = "sale"
+            elif chunk_has_restock:
+                if not re.search(r"\b(to stock|in stock|into stock|inventory)\b", c_lower):
+                    normalized_chunks.append(f"{chunk} to stock")
+                else:
+                    normalized_chunks.append(chunk)
+                current_action = "restock"
+            elif chunk_has_credit:
+                if cust_to_use and not chunk_c and not re.search(rf"\b{re.escape(cust_to_use.lower())}\b", c_lower):
+                    normalized_chunks.append(f"{cust_to_use} took {chunk}")
+                else:
+                    normalized_chunks.append(chunk)
+                current_action = "credit"
+            elif chunk_has_payment:
+                if cust_to_use and not chunk_c and not re.search(rf"\b{re.escape(cust_to_use.lower())}\b", c_lower):
+                    normalized_chunks.append(f"{cust_to_use} {chunk}")
+                else:
+                    normalized_chunks.append(chunk)
+            elif chunk_p:
+                clean_chunk = re.sub(r"\b(to stock|in stock|into stock|on credit|credit|udhaar)\b", "", chunk, flags=re.IGNORECASE).strip()
+                if current_action == "restock":
+                    normalized_chunks.append(f"Add {clean_chunk} to stock")
+                elif current_action == "credit":
+                    prefix = f"{cust_to_use} took " if cust_to_use and not re.search(rf"\b{re.escape(cust_to_use.lower())}\b", clean_chunk.lower()) else ""
+                    normalized_chunks.append(f"{prefix}{clean_chunk} on credit")
+                elif current_action == "sale":
+                    prefix = f"Sold {clean_chunk}"
+                    if cust_to_use and not re.search(rf"\b{re.escape(cust_to_use.lower())}\b", clean_chunk.lower()):
+                        prefix += f" to {cust_to_use}"
+                    normalized_chunks.append(prefix)
+                else:
+                    normalized_chunks.append(chunk)
+            else:
+                normalized_chunks.append(chunk)
+
+        return normalized_chunks
+
+    @classmethod
     def _process_local(cls, raw: str, history: List[Dict[str, str]], context: Dict[str, Any]) -> Dict[str, Any]:
         """
-        Intelligent local fallback engine powered directly by SQLite queries,
-        fuzzy matching, natural language intent classification, and strict stock checks.
+        Processes chat input, automatically recognizing and handling both single and
+        multi-ledger compound instructions (e.g. 'sold maggie 2 packets and received 2 tata salt packets').
+        """
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        sub_commands = cls._split_and_normalize_compound(raw, cursor)
+        conn.close()
+
+        if len(sub_commands) > 1:
+            results = []
+            for sub_cmd in sub_commands:
+                # Refresh context before each sub-command so sequential updates reflect immediately
+                conn_sub = get_db_connection()
+                fresh_context = cls.get_store_context(conn_sub)
+                conn_sub.close()
+
+                res = cls._process_single_local(sub_cmd, history, fresh_context)
+                results.append(res)
+
+            combined_lines = [f"{i+1}. {r['reply']}" for i, r in enumerate(results)]
+            return {
+                "reply": "Updated records:\n" + "\n".join(combined_lines),
+                "action_taken": "multi",
+                "action_details": {"sub_results": [r.get("action_details") for r in results]},
+                "clarification_needed": any(r.get("clarification_needed") for r in results)
+            }
+
+        return cls._process_single_local(raw, history, context)
+
+    @classmethod
+    def _process_single_local(cls, raw: str, history: List[Dict[str, str]], context: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Intelligent local fallback engine for a single command.
         """
         lower = raw.lower().strip()
         metrics = context["metrics"]
@@ -495,7 +657,12 @@ CRITICAL TRANSACTION RULES:
         # ---------------------------------------------------------------------
         # 6. Specific Stock Query (e.g. "How much Maggi is left?", "Check milk stock")
         # ---------------------------------------------------------------------
-        if re.search(r"\b(how much|how many|is left|check stock|in stock|stock of|do we have|available)\b", lower) and not re.search(r"\b(add|added|bought|sold|took|paid|credit)\b", lower):
+        is_stock_query = bool(
+            re.search(r"\b(how much|how many|is left|check stock|stock of|do we have|available)\b", lower) or
+            (re.search(r"\b(in stock)\b", lower) and not re.search(r"\b(add|added|received|restock|restocked|replenish|bought|sold|sell|took|paid|credit)\b", lower))
+        ) and not re.search(r"\b(add|added|received|restock|restocked|replenish|bought|sold|sell|took|paid|credit|payment)\b", lower)
+
+        if is_stock_query:
             if matched_p:
                 if matched_p["stock"] == 0:
                     status_text = "Out of Stock"
@@ -561,8 +728,10 @@ CRITICAL TRANSACTION RULES:
         # Rule: Do not interpret customer buying a product as stock addition!
         # ---------------------------------------------------------------------
         is_explicit_restock = bool(
-            re.search(r"\b(add|added|received)\b.*\b(to stock|in stock|into stock|inventory)\b", lower) or
-            re.search(r"\b(restock|replenish)\b", lower)
+            re.search(r"\b(add|added)\b.*\b(to stock|in stock|into stock|inventory)\b", lower) or
+            re.search(r"\b(restock|restocked|replenish|replenished)\b", lower) or
+            re.search(r"\b(received)\b.*\b(to stock|in stock|into stock|inventory|packets?|units?|bottles?|pcs?|kg|litres?|l)\b", lower) or
+            (re.search(r"\b(received)\b", lower) and (matched_p is not None or prod_query) and not re.search(r"\b(from|paid|payment|credit|udhaar)\b", lower))
         )
         if is_explicit_restock:
             if not matched_p and not prod_query:

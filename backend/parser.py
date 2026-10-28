@@ -144,8 +144,13 @@ def match_customer(cursor, query: str):
         c_words = re.findall(r"\w+", c_name)
         score = 0
 
-        if q in c_name:
-            score += 20
+        # Substring of full customer name inside query (e.g. 'ramesh patil' in query)
+        if c_name in q:
+            score += 40
+
+        # Full coverage bonus: all words of customer's name are in query words
+        if c_words and all(cw in q_words for cw in c_words):
+            score += 30
 
         for qw in q_words:
             for cw in c_words:

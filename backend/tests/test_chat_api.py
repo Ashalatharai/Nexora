@@ -360,5 +360,73 @@ class KiranaChatAPITestCase(unittest.TestCase):
         suresh = next(c for c in data["store_state"]["customers"] if c["name"] == "Suresh")
         self.assertGreater(suresh["due"], 0)
 
+    def test_20_compound_sale_and_restock(self):
+        """
+        Verify multi-action prompt:
+        'sold maggie 2 packets and received 2 tata salt packets'
+        - Deducts 2 Maggi from stock (sale)
+        - Adds 2 Tata Salt to stock (restock)
+        - Logs both transactions
+        """
+        state = self.client.get("/api/store/state").json()
+        maggi_before = next(p for p in state["products"] if "Maggi" in p["name"])["stock"]
+        salt_before = next(p for p in state["products"] if "Tata Salt" in p["name"])["stock"]
+
+        payload = {"message": "sold maggie 2 packets and received 2 tata salt packets", "session_id": "test_sess"}
+        response = self.client.post("/api/chat", json=payload)
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertEqual(data["action_taken"], "multi")
+        self.assertIn("Maggi", data["reply"])
+        self.assertIn("Tata Salt", data["reply"])
+        self.assertIn("Updated records", data["reply"])
+
+        maggi_after = next(p for p in data["store_state"]["products"] if "Maggi" in p["name"])["stock"]
+        salt_after = next(p for p in data["store_state"]["products"] if "Tata Salt" in p["name"])["stock"]
+        self.assertEqual(maggi_after, maggi_before - 2)
+        self.assertEqual(salt_after, salt_before + 2)
+
+    def test_21_compound_multiple_sales(self):
+        """
+        Verify multi-item sale in one prompt:
+        'Sold 3 Maggi, 2 milk'
+        - Deducts 3 Maggi and 2 Milk
+        """
+        state = self.client.get("/api/store/state").json()
+        maggi_before = next(p for p in state["products"] if "Maggi" in p["name"])["stock"]
+        milk_before = next(p for p in state["products"] if "Milk" in p["name"])["stock"]
+
+        payload = {"message": "Sold 3 Maggi, 2 milk", "session_id": "test_sess"}
+        response = self.client.post("/api/chat", json=payload)
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertEqual(data["action_taken"], "multi")
+
+        maggi_after = next(p for p in data["store_state"]["products"] if "Maggi" in p["name"])["stock"]
+        milk_after = next(p for p in data["store_state"]["products"] if "Milk" in p["name"])["stock"]
+        self.assertEqual(maggi_after, maggi_before - 3)
+        self.assertEqual(milk_after, milk_before - 2)
+
+    def test_22_compound_credit_and_payment(self):
+        """
+        Verify compound credit and payment:
+        'Ramesh took 2 milk on credit and paid 50'
+        """
+        state = self.client.get("/api/store/state").json()
+        ramesh = next(c for c in state["customers"] if c["name"] == "Ramesh")
+        due_before = ramesh["due"]
+        milk = next(p for p in state["products"] if "Milk" in p["name"])
+
+        payload = {"message": "Ramesh took 2 milk on credit and paid 50", "session_id": "test_sess"}
+        response = self.client.post("/api/chat", json=payload)
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertEqual(data["action_taken"], "multi")
+
+        ramesh_after = next(c for c in data["store_state"]["customers"] if c["name"] == "Ramesh")
+        # Due should be: due_before + (2 * price) - 50
+        expected_due = max(0.0, due_before + (2 * milk["price"]) - 50)
+        self.assertEqual(ramesh_after["due"], expected_due)
+
 if __name__ == "__main__":
     unittest.main()
