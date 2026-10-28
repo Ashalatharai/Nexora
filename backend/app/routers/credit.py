@@ -1,12 +1,13 @@
 from typing import List
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends, Path
 from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.schemas.credit import (
     CustomerResponse,
     CreditTransactionRequest,
-    CreditTransactionResponse
+    CreditTransactionResponse,
+    CustomerLedgerReconciliation
 )
 from app.services.credit_service import CreditService
 
@@ -28,5 +29,22 @@ def record_credit_transaction(
     Record customer credit purchase or payment:
     - action='credit_purchase': Increases customer debt.
     - action='payment': Decreases customer debt (rejects overpayments).
+    - Supports idempotency keys to prevent duplicate payments on retry.
     """
     return CreditService.execute_credit_transaction(db, request)
+
+
+@router.get(
+    "/customers/{customer_name}/verify",
+    response_model=CustomerLedgerReconciliation,
+    summary="Audit and reconcile customer balance against ledger history"
+)
+def verify_customer_ledger(
+    customer_name: str = Path(..., description="Customer name to audit"),
+    db: Session = Depends(get_db)
+):
+    """
+    Recomputes total credit purchases minus total payments from raw transaction history
+    and verifies that the stored balance matches exactly with zero drift.
+    """
+    return CreditService.verify_customer_ledger(db, customer_name=customer_name)

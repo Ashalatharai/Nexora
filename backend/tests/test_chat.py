@@ -42,6 +42,46 @@ def test_chat_natural_language_inventory_sale(client: TestClient):
     assert "Milk 12 → 10" in data["reply"]
 
 
+def test_chat_item_alias_support(client: TestClient):
+    """Natural message with alias: 'sold 2 maggi noodles'."""
+    payload = {
+        "message": "sold 2 maggi noodles"
+    }
+    res = client.post("/api/chat", json=payload)
+    assert res.status_code == 200
+    data = res.json()
+    assert data["success"] is True
+    assert "Maggi 40 → 38" in data["reply"]
+
+
+def test_chat_natural_language_credit_item_purchase(client: TestClient):
+    """
+    Kirana workflow: 'Ramesh took 2 rice on credit'.
+    Rice is ₹650/bag.
+    Atomically deducts 2 rice bags from stock (25 -> 23)
+    AND increases Ramesh's balance by 2 * 650 = ₹1300 (350 -> 1650)!
+    """
+    payload = {
+        "message": "Ramesh took 2 rice on credit"
+    }
+    res = client.post("/api/chat", json=payload)
+    assert res.status_code == 200
+    data = res.json()
+    assert data["success"] is True
+    assert "Rice 25 → 23" in data["reply"]
+    assert "₹350 → ₹1650" in data["reply"]
+
+    # Verify inventory was updated
+    inv_res = client.get("/api/inventory")
+    rice = next(i for i in inv_res.json() if i["name"] == "rice")
+    assert rice["quantity"] == 23.0
+
+    # Verify customer Udhaar balance was updated
+    c_res = client.get("/api/credit/customers")
+    ramesh = next(c for c in c_res.json() if c["name"] == "Ramesh")
+    assert ramesh["outstanding_balance"] == 1650.0
+
+
 def test_chat_natural_language_received(client: TestClient):
     """Natural message: 'received 20 rice bags'."""
     payload = {

@@ -14,7 +14,7 @@ if str(backend_dir) not in sys.path:
 from app.database import Base, get_db
 from app.main import app
 from app.models.inventory import InventoryItem
-from app.models.credit import Customer
+from app.models.credit import Customer, CreditTransaction
 
 # In-memory SQLite with StaticPool so all threads and sessions share the exact same in-memory DB
 engine = create_engine(
@@ -41,9 +41,21 @@ def db_session():
     ]
     session.add_all(items)
 
-    # Seed sample customer
+    # Seed sample customer with opening balance and corresponding ledger entry
     customer = Customer(name="Ramesh", phone="9876543210", outstanding_balance=350.0)
     session.add(customer)
+    session.flush()
+
+    opening_tx = CreditTransaction(
+        customer_id=customer.id,
+        customer_name=customer.name,
+        action="credit_purchase",
+        amount=350.0,
+        previous_balance=0.0,
+        resulting_balance=350.0,
+        details="Opening Udhaar Balance"
+    )
+    session.add(opening_tx)
 
     session.commit()
 

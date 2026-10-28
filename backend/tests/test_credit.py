@@ -64,6 +64,53 @@ def test_payment_reduces_balance(client: TestClient):
     assert "Ramesh paid ₹200" in data["confirmation"]
 
 
+def test_credit_idempotency_prevents_duplicate_charge(client: TestClient):
+    """Submitting duplicate credit payment with same idempotency key does not deduct twice."""
+    payload = {
+        "customer_name": "Ramesh",
+        "action": "payment",
+        "amount": 100.0,
+        "idempotency_key": "pay-key-ramesh-777"
+    }
+    res1 = client.post("/api/credit/transaction", json=payload)
+    assert res1.status_code == 200
+    assert res1.json()["is_duplicate_replay"] is False
+    assert res1.json()["resulting_balance"] == 250.0
+
+    res2 = client.post("/api/credit/transaction", json=payload)
+    assert res2.status_code == 200
+    assert res2.json()["is_duplicate_replay"] is True
+
+    # Balance is still 250 (not 150)
+    c_res = client.get("/api/credit/customers")
+    ramesh = next(c for c in c_res.json() if c["name"] == "Ramesh")
+    assert ramesh["outstanding_balance"] == 250.0
+
+
+def test_customer_ledger_reconciliation(client: TestClient):
+    """GET /api/credit/customers/{name}/verify recomputes balance from transactions."""
+    # 1. Take credit
+    client.post("/api/credit/transaction", json={
+        "customer_name": "Ramesh",
+        "action": "credit_purchase",
+        "amount": 100.0
+    })
+    # 2. Pay debt
+    client.post("/api/credit/transaction", json={
+        "customer_name": "Ramesh",
+        "action": "payment",
+        "amount": 50.0
+    })
+
+    res = client.get("/api/credit/customers/Ramesh/verify")
+    assert res.status_code == 200
+    data = res.json()
+    assert data["is_consistent"] is True
+    assert data["total_purchases"] == 450.0
+    assert data["total_payments"] == 50.0
+    assert data["current_balance"] == 400.0
+
+
 def test_reject_payment_exceeding_balance(client: TestClient):
     """Ramesh has 350. Attempting to pay 500 must be rejected."""
     payload = {
@@ -75,7 +122,6 @@ def test_reject_payment_exceeding_balance(client: TestClient):
     assert res.status_code == 400
     assert "exceeds the outstanding balance" in res.json()["detail"]
 
-    # Verify balance is still 350
     c_res = client.get("/api/credit/customers")
     ramesh = next(c for c in c_res.json() if c["name"] == "Ramesh")
     assert ramesh["outstanding_balance"] == 350.0

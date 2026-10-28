@@ -12,13 +12,14 @@ from app.schemas.chat import (
 from app.schemas.inventory import (
     SingleItemAction,
     InventoryAction,
-    InventoryTransactionRequest
+    InventoryTransactionRequest,
+    ItemUpdateResult
 )
 from app.schemas.credit import (
     CreditTransactionRequest,
     CreditAction
 )
-from app.services.inventory_service import InventoryService
+from app.services.inventory_service import InventoryService, format_qty
 from app.services.credit_service import CreditService
 from app.services.parser_service import MessageParserFallback
 
@@ -31,6 +32,7 @@ def process_chat_message(request: ChatRequest, db: Session = Depends(get_db)):
     Unified chat endpoint:
     - Accepts pre-parsed structured actions (from the message-parser teammate).
     - Falls back to rule-based parsing if raw text is sent without actions.
+    - Supports atomic combined credit-item purchases (e.g. 'Ramesh took 2 rice on credit').
     - Returns a clear human-readable confirmation suitable for chat UI.
     """
     actions: List[ChatStructuredAction] = []
@@ -53,6 +55,7 @@ def process_chat_message(request: ChatRequest, db: Session = Depends(get_db)):
                 "• 'sold 3 maggi, 2 milk'\n"
                 "• 'received 20 rice bags'\n"
                 "• 'damaged 1 oil'\n"
+                "• 'Ramesh took 2 rice on credit'\n"
                 "• 'Ramesh paid ₹200'\n"
                 "• 'Ramesh took 500 on credit'"
             ),
@@ -65,16 +68,79 @@ def process_chat_message(request: ChatRequest, db: Session = Depends(get_db)):
         credit_act = actions[0]
         action_name = credit_act.action.lower()
 
-        # Map to CreditAction enum
         if action_name in ["payment", "paid", "clear"]:
             mapped_action = CreditAction.PAYMENT
         else:
             mapped_action = CreditAction.CREDIT_PURCHASE
 
-        if not credit_act.customer_name or credit_act.amount is None:
+        if not credit_act.customer_name:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Credit actions must specify both customer_name and amount."
+                detail="Credit actions must specify customer_name."
+            )
+
+        # Special Case: Credit sale of an inventory item (e.g. 'Ramesh took 2 rice on credit')
+        if credit_act.item_name and credit_act.quantity:
+            item = InventoryService.get_item_by_name(db, credit_act.item_name)
+            if not item:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Item '{credit_act.item_name}' was not found in inventory."
+                )
+
+            qty = credit_act.quantity
+            if item.quantity < qty:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=(
+                        f"Insufficient stock for '{item.name.title()}'. "
+                        f"Only {format_qty(item.quantity)} {item.unit} available, but {format_qty(qty)} requested on credit."
+                    )
+                )
+
+            # Calculate price
+            calculated_amount = credit_act.amount if credit_act.amount is not None else round(qty * item.price, 2)
+
+            # Deduct stock atomically
+            inv_res = InventoryService.execute_transaction(
+                db,
+                InventoryTransactionRequest(
+                    items=[SingleItemAction(action=InventoryAction.SOLD, item_name=item.name, quantity=qty)],
+                    note=f"Credit sale to {credit_act.customer_name}"
+                )
+            )
+
+            # Add to customer Udhaar
+            credit_req = CreditTransactionRequest(
+                customer_name=credit_act.customer_name,
+                action=CreditAction.CREDIT_PURCHASE,
+                amount=calculated_amount,
+                details=f"{format_qty(qty)} {item.name.title()} @ ₹{item.price:g}/{item.unit}"
+            )
+            credit_res = CreditService.execute_credit_transaction(db, credit_req)
+
+            combined_reply = (
+                f"{inv_res.confirmation}. "
+                f"{credit_res.confirmation} ({format_qty(qty)} {item.name.title()} @ ₹{item.price:g} = ₹{calculated_amount:g})"
+            )
+            if inv_res.low_stock_alerts:
+                combined_reply += "\n" + "\n".join(inv_res.low_stock_alerts)
+
+            return ChatResponse(
+                success=True,
+                reply=combined_reply,
+                intent="credit",
+                parsed_actions=actions,
+                inventory_updates=inv_res.updates,
+                credit_update=credit_res,
+                low_stock_alerts=inv_res.low_stock_alerts
+            )
+
+        # Standard Credit Amount Transaction
+        if credit_act.amount is None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Credit transaction must specify an amount."
             )
 
         credit_req = CreditTransactionRequest(

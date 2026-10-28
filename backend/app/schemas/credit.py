@@ -33,9 +33,10 @@ class CustomerResponse(CustomerBase):
 
 class CreditTransactionRequest(BaseModel):
     customer_name: str = Field(..., min_length=1, description="Customer name")
-    action: CreditAction = Field(..., description="Action: 'credit_purchase' (taking goods on credit) or 'payment' (clearing debt)")
+    action: CreditAction = Field(..., description="Action: 'credit_purchase' or 'payment'")
     amount: float = Field(..., gt=0.0, description="Amount in INR (must be > 0)")
     details: Optional[str] = Field(None, description="Optional details (e.g. '2 rice bags on credit')")
+    idempotency_key: Optional[str] = Field(None, description="Optional unique key to prevent duplicate payments on retry")
 
     @field_validator("customer_name")
     @classmethod
@@ -52,3 +53,14 @@ class CreditTransactionResponse(BaseModel):
     previous_balance: float
     resulting_balance: float
     timestamp: datetime
+    is_duplicate_replay: bool = False
+
+
+class CustomerLedgerReconciliation(BaseModel):
+    customer_id: int
+    customer_name: str
+    current_balance: float
+    computed_balance_from_ledger: float
+    is_consistent: bool
+    total_purchases: float
+    total_payments: float

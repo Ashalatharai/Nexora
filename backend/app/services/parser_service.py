@@ -1,12 +1,12 @@
 import re
 from typing import List, Tuple
 from app.schemas.chat import ChatStructuredAction, ActionDomain
+from app.models.inventory import ITEM_ALIASES
 
 
 class MessageParserFallback:
     """
     Decoupled rule-based / regex parser fallback.
-    Used when the frontend or user submits a raw message without pre-parsed actions.
     Translates natural-language shopkeeper sentences into ChatStructuredAction objects.
     """
 
@@ -19,7 +19,7 @@ class MessageParserFallback:
         text = raw_text.strip().lower()
         actions: List[ChatStructuredAction] = []
 
-        # 1. Check for Credit: Payment (e.g., "ramesh paid ₹200", "ramesh paid 200", "received 500 from ramesh")
+        # 1. Check for Credit: Payment (e.g. "Ramesh paid ₹200", "Ramesh paid 200", "received 500 from Ramesh")
         payment_match = (
             re.search(r"([a-z\s]+?)\s+(?:paid|cleared|deposited)\s+[₹rs.]*\s*([0-9]+(?:\.[0-9]+)?)", text) or
             re.search(r"(?:received|got)\s+[₹rs.]*\s*([0-9]+(?:\.[0-9]+)?)\s+(?:from)\s+([a-z\s]+)", text)
@@ -42,7 +42,41 @@ class MessageParserFallback:
             )
             return actions, "credit"
 
-        # 2. Check for Credit: Purchase / Udhaar (e.g. "ramesh took 200 on credit", "ramesh credit 500", "udhaar ramesh 300", "ramesh took 2 rice on credit")
+        # 2. Check for Credit Sale of Items: e.g. "Ramesh took 2 rice on credit", "Ramesh bought 3 maggi on udhaar"
+        credit_item_match = re.search(
+            r"([a-z\s]+?)\s+(?:took|bought|purchased|got)\s+([0-9]+(?:\.[0-9]+)?)\s+([a-z0-9\s]+?)\s+(?:on\s+credit|on\s+udhaar|in\s+udhaar|udhaar)",
+            text
+        )
+        if credit_item_match:
+            customer_name = credit_item_match.group(1).strip().title()
+            qty = float(credit_item_match.group(2))
+            item_raw = credit_item_match.group(3).strip()
+
+            # Clean trailing unit
+            units = ["bags", "bag", "packets", "packet", "pkts", "pkt", "bottles", "bottle", "bars", "bar", "kg", "kgs", "litres", "litre", "l"]
+            tokens = item_raw.split()
+            if len(tokens) > 1 and tokens[-1] in units:
+                item_name = " ".join(tokens[:-1])
+                unit = tokens[-1]
+            else:
+                item_name = item_raw
+                unit = None
+
+            canonical_name = ITEM_ALIASES.get(item_name.lower(), item_name.lower())
+
+            actions.append(
+                ChatStructuredAction(
+                    domain=ActionDomain.CREDIT,
+                    action="credit_purchase",
+                    customer_name=customer_name,
+                    item_name=canonical_name,
+                    quantity=qty,
+                    unit=unit
+                )
+            )
+            return actions, "credit"
+
+        # 3. Check for Direct Credit Amount: e.g. "Ramesh took 200 on credit", "Ramesh credit 500", "udhaar Ramesh 300"
         credit_amount_match = re.search(
             r"([a-z\s]+?)\s+(?:took|borrowed)?\s*[₹rs.]*\s*([0-9]+(?:\.[0-9]+)?)\s*(?:on\s+credit|udhaar)",
             text
@@ -60,9 +94,7 @@ class MessageParserFallback:
             )
             return actions, "credit"
 
-        # 3. Check for Inventory Actions:
-        # e.g., "sold 3 maggi, 2 milk", "received 20 rice bags", "damaged 1 oil", "returned 2 soap"
-        # Determine overall action or per-clause action
+        # 4. Check for Inventory Actions: e.g. "sold 3 maggi, 2 milk", "received 20 rice bags", "damaged 1 oil"
         action_keywords = {
             "sold": "sold",
             "sell": "sold",
@@ -78,8 +110,6 @@ class MessageParserFallback:
             "return": "returned",
         }
 
-        # Check if message starts with an action or has action verbs
-        # Split by comma or "and" for multi-item clauses
         clauses = re.split(r"[,&]|\band\b", text)
         current_action = None
 
@@ -88,12 +118,10 @@ class MessageParserFallback:
             if not clause:
                 continue
 
-            # Check if this clause specifies a new action
             words = clause.split()
             first_word = words[0] if words else ""
             if first_word in action_keywords:
                 current_action = action_keywords[first_word]
-                # Remove action keyword from clause
                 clause = " ".join(words[1:])
             elif current_action is None:
                 for k, v in action_keywords.items():
@@ -103,16 +131,13 @@ class MessageParserFallback:
                         break
 
             if not current_action:
-                current_action = "sold"  # default kirana shopkeeper intent is sales
+                current_action = "sold"
 
-            # Match pattern: <quantity> <item_name> [unit]
-            # e.g., "3 maggi", "20 rice bags", "1 oil"
             item_match = re.search(r"([0-9]+(?:\.[0-9]+)?)\s+([a-z0-9\s]+)", clause)
             if item_match:
                 qty = float(item_match.group(1))
                 item_raw = item_match.group(2).strip()
 
-                # Clean common trailing units if present
                 units = ["bags", "bag", "packets", "packet", "pkts", "pkt", "bottles", "bottle", "bars", "bar", "kg", "kgs", "litres", "litre", "l"]
                 detected_unit = None
                 tokens = item_raw.split()
@@ -122,11 +147,13 @@ class MessageParserFallback:
                 else:
                     item_name = item_raw
 
+                canonical_name = ITEM_ALIASES.get(item_name.lower(), item_name.lower())
+
                 actions.append(
                     ChatStructuredAction(
                         domain=ActionDomain.INVENTORY,
                         action=current_action,
-                        item_name=item_name.strip(),
+                        item_name=canonical_name,
                         quantity=qty,
                         unit=detected_unit
                     )

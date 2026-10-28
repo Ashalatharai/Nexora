@@ -27,6 +27,20 @@ def test_inventory_single_item_sold(client: TestClient):
     assert data["updates"][0]["resulting_stock"] == 37.0
 
 
+def test_item_alias_normalization(client: TestClient):
+    """Alias 'maggi noodles' resolves cleanly to 'maggi'."""
+    payload = {
+        "items": [
+            {"action": "sold", "item_name": "maggi noodles", "quantity": 2}
+        ]
+    }
+    res = client.post("/api/inventory/transaction", json=payload)
+    assert res.status_code == 200
+    data = res.json()
+    assert data["updates"][0]["item_name"] == "maggi"
+    assert data["updates"][0]["resulting_stock"] == 38.0
+
+
 def test_inventory_multiple_items_batch(client: TestClient):
     """Support multiple items in one request: sold 3 maggi, 2 milk."""
     payload = {
@@ -77,7 +91,6 @@ def test_atomic_rollback_on_insufficient_stock(client: TestClient):
     If one item in a batch has insufficient stock, the ENTIRE batch must be rejected.
     Neither item must have its stock changed.
     """
-    # maggi has 40, milk has 12. Request 5 maggi (valid) and 50 milk (insufficient).
     payload = {
         "items": [
             {"action": "sold", "item_name": "maggi", "quantity": 5},
@@ -107,10 +120,65 @@ def test_atomic_rollback_on_nonexistent_item(client: TestClient):
     assert res.status_code == 400
     assert "non_existent_biscuit_xyz" in res.json()["detail"]
 
-    # Verify maggi was NOT modified
     inv_res = client.get("/api/inventory")
     items = {i["name"]: i["quantity"] for i in inv_res.json()}
     assert items["maggi"] == 40.0
+
+
+def test_idempotency_prevents_duplicate_deduction(client: TestClient):
+    """Submitting the same idempotency key twice returns replay and does not deduct stock twice."""
+    payload = {
+        "items": [
+            {"action": "sold", "item_name": "maggi", "quantity": 5}
+        ],
+        "idempotency_key": "unique-client-key-12345"
+    }
+
+    # First request
+    res1 = client.post("/api/inventory/transaction", json=payload)
+    assert res1.status_code == 200
+    assert res1.json()["is_duplicate_replay"] is False
+    assert res1.json()["updates"][0]["resulting_stock"] == 35.0
+
+    # Second duplicate request (e.g. user double-tapped or network retried)
+    res2 = client.post("/api/inventory/transaction", json=payload)
+    assert res2.status_code == 200
+    assert res2.json()["is_duplicate_replay"] is True
+
+    # Confirm stock was only deducted ONCE (35, not 30)
+    inv_res = client.get("/api/inventory")
+    maggi = next(i for i in inv_res.json() if i["name"] == "maggi")
+    assert maggi["quantity"] == 35.0
+
+
+def test_transaction_reversal(client: TestClient):
+    """Auditably reverse a transaction and restore stock safely."""
+    # 1. Sell 10 maggi (40 -> 30)
+    res = client.post("/api/inventory/transaction", json={
+        "items": [{"action": "sold", "item_name": "maggi", "quantity": 10}]
+    })
+    assert res.status_code == 200
+
+    # 2. Query transactions to get ID
+    from app.models.inventory import InventoryTransaction
+    from app.database import SessionLocal
+    # Get transaction ID from API through reversal
+    # Since first transaction created is ID 1
+    rev_res = client.post("/api/inventory/transaction/1/reverse", json={"reason": "Shopkeeper entered wrong number"})
+    assert rev_res.status_code == 200
+    rev_data = rev_res.json()
+    assert rev_data["success"] is True
+    assert rev_data["restored_stock"] == 40.0
+
+    # Check stock restored in inventory
+    inv_res = client.get("/api/inventory")
+    maggi = next(i for i in inv_res.json() if i["name"] == "maggi")
+    assert maggi["quantity"] == 40.0
+
+    # Attempting to reverse the same transaction again must be rejected
+    dup_rev = client.post("/api/inventory/transaction/1/reverse")
+    assert dup_rev.status_code == 400
+    assert "already been reversed" in dup_rev.json()["detail"]
 
 
 def test_reject_zero_or_negative_quantity(client: TestClient):
