@@ -54,6 +54,49 @@ const seedState = {
   onboardingComplete: false,
 };
 
+
+const API_BASE = "/api";
+
+function getCategory(name) {
+  const n = (name || "").toLowerCase();
+  if (n.includes("milk") || n.includes("butter") || n.includes("curd") || n.includes("paneer")) return "Dairy";
+  if (n.includes("maggi") || n.includes("biscuit") || n.includes("cookie") || n.includes("chips")) return "Snacks";
+  if (n.includes("rice") || n.includes("oil") || n.includes("atta") || n.includes("dal") || n.includes("sugar")) return "Grocery";
+  if (n.includes("soap") || n.includes("detergent") || n.includes("surf")) return "Household";
+  if (n.includes("salt") || n.includes("tea")) return "Essentials";
+  return "Grocery";
+}
+
+function mapBackendInventory(items) {
+  if (!items || !items.length) return [];
+  return items.map((item) => ({
+    id: String(item.id),
+    name: item.name.charAt(0).toUpperCase() + item.name.slice(1),
+    category: getCategory(item.name),
+    price: item.price,
+    stock: item.quantity,
+    minStock: item.min_threshold,
+    unit: item.unit || "unit",
+    sku: `SKU-${String(item.id).padStart(3, "0")}`,
+    isLowStock: item.is_low_stock,
+    isOutOfStock: item.is_out_of_stock,
+  }));
+}
+
+function mapBackendCustomers(customers) {
+  if (!customers || !customers.length) return [];
+  const colors = ["mint", "lavender", "peach", "blue", "rose", "sand"];
+  return customers.map((c, i) => ({
+    id: String(c.id),
+    name: c.name,
+    phone: c.phone || "+91 98765 00000",
+    due: c.outstanding_balance,
+    lastActive: "Today",
+    initials: c.name.slice(0, 2).toUpperCase(),
+    color: colors[i % colors.length],
+  }));
+}
+
 function readStoredState() {
   try {
     const stored = localStorage.getItem(STORAGE_KEY);
@@ -65,6 +108,39 @@ function readStoredState() {
 
 function StoreProvider({ children }) {
   const [data, setData] = useState(readStoredState);
+  const [backendConnected, setBackendConnected] = useState(false);
+
+  const refreshBackend = async () => {
+    try {
+      const [invRes, custRes, sumRes] = await Promise.all([
+        fetch(`${API_BASE}/inventory`).then((r) => (r.ok ? r.json() : null)),
+        fetch(`${API_BASE}/credit/customers`).then((r) => (r.ok ? r.json() : null)),
+        fetch(`${API_BASE}/summary/daily`).then((r) => (r.ok ? r.json() : null)),
+      ]);
+
+      setData((current) => {
+        const next = { ...current };
+        if (invRes && invRes.length > 0) {
+          next.products = mapBackendInventory(invRes);
+        }
+        if (custRes && custRes.length > 0) {
+          next.customers = mapBackendCustomers(custRes);
+        }
+        if (sumRes) {
+          next.todaySales = sumRes.gross_sales_value_inr ?? sumRes.total_sales_amount ?? current.todaySales;
+        }
+        return next;
+      });
+      setBackendConnected(true);
+    } catch (err) {
+      console.warn("Could not reach Kirana backend, using local state:", err);
+    }
+  };
+
+  useEffect(() => {
+    refreshBackend();
+  }, []);
+
   useEffect(() => localStorage.setItem(STORAGE_KEY, JSON.stringify(data)), [data]);
   const updateProduct = (id, updater) => setData((current) => ({ ...current, products: current.products.map((item) => item.id === id ? updater(item) : item) }));
   const addTransaction = (transaction) => setData((current) => ({
@@ -72,7 +148,7 @@ function StoreProvider({ children }) {
     transactions: [{ ...transaction, id: `t${Date.now()}`, time: "Just now", date: "Today" }, ...current.transactions],
     todaySales: transaction.type === "sale" ? current.todaySales + transaction.amount : current.todaySales,
   }));
-  const value = { data, setData, updateProduct, addTransaction };
+  const value = { data, setData, updateProduct, addTransaction, refreshBackend, backendConnected };
   return <StoreContext.Provider value={value}>{children}</StoreContext.Provider>;
 }
 
@@ -320,58 +396,79 @@ function SettingsPage() {
 }
 
 function Assistant() {
-  const { data, setData, updateProduct, addTransaction } = useStore();
+  const { data, setData, addTransaction, refreshBackend } = useStore();
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
   const bottomRef = useRef(null);
-  useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: "smooth" }); }, [data.messages]);
-  const findProduct = (text) => data.products
-    .map((product) => ({ product, score: product.name.toLowerCase().split(/\s+/).filter((word) => word.length >= 4 && text.includes(word)).reduce((sum, word) => sum + word.length, 0) }))
-    .filter((match) => match.score > 0)
-    .sort((a, b) => b.score - a.score)[0]?.product;
-  const processMessage = (raw) => {
+
+  useEffect(() => {
+    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [data.messages]);
+
+  const processMessage = async (raw) => {
     const text = raw.trim();
     if (!text) return;
+
     const userMessage = { id: `m${Date.now()}`, role: "user", text };
     setData((current) => ({ ...current, messages: [...current.messages, userMessage] }));
-    setInput(""); setBusy(true);
-    window.setTimeout(() => {
-      const lower = text.toLowerCase();
-      let reply = "";
-      let action = null;
-      const count = Number(text.match(/\b(\d+)\b/)?.[1] || 1);
-      if (/(sold|sale|sell)/.test(lower)) {
-        const product = findProduct(lower);
-        if (product) {
-          updateProduct(product.id, (item) => ({ ...item, stock: Math.max(item.stock - count, 0) }));
-          const total = product.price * count; addTransaction({ title: `${product.name} sold`, detail: `${count} ${product.unit}${count === 1 ? "" : "s"} · Cash sale`, amount: total, type: "sale" });
-          reply = `Done! I recorded ${count} ${product.unit}${count === 1 ? "" : "s"} of ${product.name} as sold (${money(total)}). I've updated your stock too.`;
-        } else reply = "I couldn't find that product in your inventory. Try using its full name, or add it to your catalogue first.";
-      } else if (/(received|restock|added|bought)/.test(lower)) {
-        const product = findProduct(lower);
-        if (product) { updateProduct(product.id, (item) => ({ ...item, stock: item.stock + count })); reply = `Stock updated! I've added ${count} ${product.unit}${count === 1 ? "" : "s"} of ${product.name}. You now have ${product.stock + count} ${product.unit}s.`; }
-        else reply = "I couldn't find that product in your inventory. Try its full name, for example: “Received 20 Amul milk packets”.";
-      } else if (/(paid|payment)/.test(lower)) {
-        const customer = data.customers.find((item) => lower.includes(item.name.toLowerCase().split(" ")[0]));
-        if (customer) { const paid = Number(text.match(/(?:₹|rs\.?\s*)?(\d+(?:,\d{3})*(?:\.\d+)?)/i)?.[1]?.replaceAll(",", "") || 0); if (paid) { setData((current) => ({ ...current, customers: current.customers.map((item) => item.id === customer.id ? { ...item, due: Math.max(0, item.due - paid) } : item) })); addTransaction({ customerId: customer.id, title: "Udhaar payment received", detail: `${customer.name} · Cash`, amount: paid, type: "payment" }); reply = `Payment noted. ${customer.name} paid ${money(paid)}. Their remaining balance is ${money(Math.max(0, customer.due - paid))}.`; } else reply = "How much did they pay? Try “Ramesh paid ₹500”."; }
-        else reply = "Who made the payment? Try “Ramesh paid ₹500”.";
-      } else if (/(credit|udhaar|took)/.test(lower)) {
-        const customer = data.customers.find((item) => lower.includes(item.name.toLowerCase().split(" ")[0]));
-        const product = findProduct(lower);
-        if (customer) { const total = product ? product.price * count : count; const updatedCustomer = { ...customer, due: customer.due + total }; setData((current) => ({ ...current, customers: current.customers.map((item) => item.id === customer.id ? updatedCustomer : item) })); if (product) updateProduct(product.id, (item) => ({ ...item, stock: Math.max(item.stock - count, 0) })); addTransaction({ customerId: customer.id, title: "Udhaar added", detail: `${customer.name} · ${count} ${product?.name || "items"}`, amount: total, type: "credit" }); reply = `Added ${money(total)} to ${customer.name}'s Udhaar${product ? ` for ${count} ${product.name}` : ""}. Their total balance is now ${money(updatedCustomer.due)}.`; }
-        else reply = "I couldn't find that customer. Try a name from your customer list, like “Ramesh took 2 Maggi on credit”.";
-      } else if (/(low|stock|inventory|left|have)/.test(lower)) {
-        const mentioned = findProduct(lower);
-        if (mentioned) reply = `You have ${mentioned.stock} ${mentioned.unit}${mentioned.stock === 1 ? "" : "s"} of ${mentioned.name} in stock.`;
-        else { const low = data.products.filter((item) => item.stock <= item.minStock); reply = low.length ? `These ${low.length} products need a restock: ${low.map((item) => `${item.name} (${item.stock} left)`).join(", ")}.` : "Everything is looking well-stocked right now."; }
-      } else if (/(sales|sold today|today)/.test(lower)) reply = `Your sales today are ${money(data.todaySales)} so far — that's 17.7% higher than yesterday. Keep it up!`;
-      else if (/(owe|owed|customer)/.test(lower)) { const due = data.customers.filter((item) => item.due > 0); reply = `You have ${due.length} customers with outstanding Udhaar, totalling ${money(due.reduce((sum, item) => sum + item.due, 0))}. Your largest balance is with ${due.sort((a, b) => b.due - a.due)[0]?.name || "a customer"}.`; }
-      else reply = "I’m here to help run your shop. Try “Sold 5 Maggi”, “Received 20 milk packets”, “Ramesh paid ₹500”, or ask me about today’s sales.";
-      const assistantMessage = { id: `m${Date.now()}-reply`, role: "assistant", text: reply };
+    setInput("");
+    setBusy(true);
+
+    try {
+      const res = await fetch(`${API_BASE}/chat`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ message: text }),
+      });
+
+      if (res.ok) {
+        const payload = await res.json();
+        const replyText = payload.reply || "Done.";
+        const assistantMessage = { id: `m${Date.now()}-reply`, role: "assistant", text: replyText };
+        setData((current) => ({ ...current, messages: [...current.messages, assistantMessage] }));
+
+        if (payload.success) {
+          if (payload.inventory_updates && payload.inventory_updates.length > 0) {
+            payload.inventory_updates.forEach((u) => {
+              addTransaction({
+                title: `${u.item_name} ${u.action}`,
+                detail: `${u.quantity} ${u.unit} · Stock: ${u.previous_stock} → ${u.resulting_stock}`,
+                amount: 0,
+                type: u.action === "sold" ? "sale" : "restock",
+              });
+            });
+          }
+          if (payload.credit_update) {
+            const cu = payload.credit_update;
+            addTransaction({
+              customerId: String(cu.customer_name),
+              title: cu.action === "payment" ? "Udhaar payment received" : "Udhaar added",
+              detail: `${cu.customer_name} · Resulting balance: ₹${cu.resulting_balance}`,
+              amount: cu.amount,
+              type: cu.action === "payment" ? "payment" : "credit",
+            });
+          }
+          await refreshBackend();
+        }
+      } else {
+        const errPayload = await res.json().catch(() => ({}));
+        const replyText = errPayload.detail || "Sorry, I could not process that request.";
+        const assistantMessage = { id: `m${Date.now()}-reply`, role: "assistant", text: replyText };
+        setData((current) => ({ ...current, messages: [...current.messages, assistantMessage] }));
+      }
+    } catch (error) {
+      console.error("Chat backend connection error:", error);
+      const assistantMessage = {
+        id: `m${Date.now()}-reply`,
+        role: "assistant",
+        text: "Could not connect to Kirana Ledger backend API. Please make sure the backend is running at http://127.0.0.1:8000.",
+      };
       setData((current) => ({ ...current, messages: [...current.messages, assistantMessage] }));
+    } finally {
       setBusy(false);
-    }, 420);
+    }
   };
+
   return <div className="assistant-page"><div className="assistant-heading"><div><div className="eyebrow">YOUR SHOP ASSISTANT</div><h1>What can I help with?</h1><p>A simple message is all it takes to keep your shop in good shape.</p></div><span className="assistant-online"><i /> Here for you</span></div><div className="assistant-workspace"><aside className="assistant-side"><div className="assistant-side-title"><Sparkles size={17} /> Try asking</div><p>Say it just like you’d say it to a friend.</p>{["Sold 5 Maggi", "Received 20 milk packets", "Ramesh paid ₹500", "Which products are low?", "Show today's sales"].map((suggestion) => <button className="suggestion-button" key={suggestion} onClick={() => processMessage(suggestion)}><MessageCircle size={15} />{suggestion}<ArrowRight size={14} /></button>)}<div className="assistant-privacy"><ShieldCheck size={15} /><span>Your shop data stays private on this device.</span></div></aside><section className="assistant-chat"><div className="chat-topline"><span className="assistant-bot-avatar"><Sparkles size={17} /></span><span><strong>Kirana Assistant</strong><small><i /> Online · ready when you are</small></span><button className="icon-button chat-menu" aria-label="More"><Ellipsis size={19} /></button></div><div className="chat-messages">{data.messages.length === 0 && <div className="chat-welcome"><div className="assistant-welcome-icon"><MessageCircle size={23} /></div><span className="eyebrow">YOUR EVERYDAY SHOP PARTNER</span><h2>Namaste, Ramesh!</h2><p>Your shop is in good hands. Ask me about your stock, record a sale, or just check in on your business.</p><div className="welcome-prompts">{["How much Maggi do I have?", "Who owes me money?"].map((prompt) => <button key={prompt} onClick={() => processMessage(prompt)}>{prompt}<ArrowRight size={14} /></button>)}</div></div>}{data.messages.map((message) => <div className={`chat-message message-${message.role}`} key={message.id}>{message.role === "assistant" && <span className="message-avatar"><Sparkles size={13} /></span>}<div className="message-bubble">{message.text}<small>{message.role === "user" ? "You · just now" : "Kirana Assistant · just now"}</small></div>{message.role === "user" && <span className="message-user-avatar">RS</span>}</div>)}{busy && <div className="chat-message message-assistant"><span className="message-avatar"><Sparkles size={13} /></span><div className="typing-indicator"><i /><i /><i /></div></div>}<div ref={bottomRef} /></div><form className="chat-composer" onSubmit={(event) => { event.preventDefault(); processMessage(input); }}><input value={input} onChange={(event) => setInput(event.target.value)} placeholder="Tell me what happened at your shop..." /><button className="composer-mic" type="button" aria-label="Voice input"><Mic size={18} /></button><button className="send-button" type="submit" disabled={!input.trim() || busy} aria-label="Send message"><Send size={17} /></button><span className="composer-note">Press enter to send</span></form></section></div></div>;
 }
 
