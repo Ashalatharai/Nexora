@@ -6,7 +6,7 @@ import {
   Filter, Home, IndianRupee, LayoutDashboard, ListFilter, LogOut, Menu,
   MessageCircle, Mic, Minus, MoreHorizontal, Package, Plus, Search, Send,
   Settings, ShieldCheck, ShoppingBag, Sparkles, TrendingDown, TrendingUp,
-  UserRound, Users, Wallet, X, AlertTriangle,
+  UserRound, Users, Wallet, X, AlertTriangle, RefreshCw
 } from "lucide-react";
 import { createContext, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { Link, NavLink, Navigate, Route, Routes, useLocation, useNavigate, useParams } from "react-router-dom";
@@ -45,15 +45,14 @@ const seedState = {
     { id: "t6", customerId: "", title: "Cash sale", detail: "Walk-in customer", amount: 450, type: "sale", time: "Yesterday", date: "Yesterday" },
   ],
   suppliers: [
-    { id: "s1", name: "Shree Dairy Suppliers", category: "Dairy & milk", initials: "SD", color: "mint", delivery: "Same-day delivery", products: 4, minimum: 500 },
-    { id: "s2", name: "Maharashtra Grocery Co.", category: "Grocery & staples", initials: "MG", color: "sand", delivery: "Next-day delivery", products: 12, minimum: 1000 },
-    { id: "s3", name: "Pune General Distributors", category: "Snacks & household", initials: "PG", color: "lavender", delivery: "Next-day delivery", products: 8, minimum: 750 },
+    { id: "s1", name: "Shree Dairy Suppliers", phone: "+91 98220 99112", category: "Dairy & milk", initials: "SD", color: "mint", delivery: "Same-day delivery", products: 4, minimum: 500 },
+    { id: "s2", name: "Maharashtra Grocery Co.", phone: "+91 98901 44221", category: "Grocery & staples", initials: "MG", color: "sand", delivery: "Next-day delivery", products: 12, minimum: 1000 },
+    { id: "s3", name: "Pune General Distributors", phone: "+91 97654 33889", category: "Snacks & household", initials: "PG", color: "lavender", delivery: "Next-day delivery", products: 8, minimum: 750 },
   ],
   todaySales: 4850,
   messages: [],
   onboardingComplete: false,
 };
-
 
 const API_BASE = "/api";
 
@@ -174,43 +173,138 @@ const pageNames = {
 
 function Brand({ compact = false }) {
   return <Link className={`brand ${compact ? "brand-compact" : ""}`} to="/dashboard">
-    <span className="brand-mark"><ShoppingBag size={19} strokeWidth={2.2} /><MessageCircle className="brand-chat" size={11} /></span>
+    <span className="brand-mark"><ShoppingBag size={21} strokeWidth={2.2} /><MessageCircle className="brand-chat" size={13} /></span>
     {!compact && <span className="brand-wordmark">kirana<span>ledger</span></span>}
   </Link>;
 }
 
 function Sidebar() {
   const location = useLocation();
+  const navigate = useNavigate();
+  const { data } = useStore();
+  const lowCount = data.products.filter(p => p.stock <= p.minStock).length;
+
+  const handleLogout = () => {
+    sessionStorage.removeItem("kirana-ledger-demo-session");
+    navigate("/login");
+  };
+
   return <aside className="sidebar">
     <Brand />
-    <div className="shop-switcher"><div className="shop-avatar">SG</div><div className="shop-switch-copy"><strong>Sharma General Store</strong><span>Free plan</span></div><ChevronDown size={15} /></div>
+    <div className="shop-switcher">
+      <div className="shop-avatar">SG</div>
+      <div className="shop-switch-copy"><strong>Sharma General Store</strong><span>Kirana Pro</span></div>
+      <ChevronDown size={16} />
+    </div>
     <div className="nav-caption">WORKSPACE</div>
     <nav className="side-nav">
-      {navItems.map(({ to, label, Icon }) => <NavLink key={to} to={to} className={({ isActive }) => `nav-link ${isActive && (to === "/dashboard" ? location.pathname === "/dashboard" : true) ? "active" : ""}`}>
-        <Icon size={18} strokeWidth={1.8} /><span>{label}</span>{label === "Low stock" && <span className="nav-count">7</span>}
-      </NavLink>)}
+      {navItems.map(({ to, label, Icon }) => (
+        <NavLink
+          key={to}
+          to={to}
+          className={({ isActive }) => `nav-link ${isActive && (to === "/dashboard" ? location.pathname === "/dashboard" : true) ? "active" : ""}`}
+        >
+          <Icon size={20} strokeWidth={1.8} />
+          <span>{label}</span>
+          {label === "Low stock" && lowCount > 0 && <span className="nav-count">{lowCount}</span>}
+        </NavLink>
+      ))}
     </nav>
     <div className="sidebar-bottom">
-      <NavLink to="/settings" className={({ isActive }) => `nav-link ${isActive ? "active" : ""}`}><Settings size={18} strokeWidth={1.8} /><span>Settings</span></NavLink>
-      <div className="help-card"><div className="help-icon"><CircleHelp size={17} /></div><div><strong>Need a hand?</strong><span>We're here to help</span></div><ArrowRight size={15} /></div>
-      <button className="profile-card" onClick={() => window.location.assign("/settings")}><div className="profile-avatar">RS</div><div className="profile-copy"><strong>Ramesh Sharma</strong><span>Shop owner</span></div><MoreHorizontal size={17} /></button>
+      <NavLink to="/settings" className={({ isActive }) => `nav-link ${isActive ? "active" : ""}`}>
+        <Settings size={20} strokeWidth={1.8} /><span>Settings</span>
+      </NavLink>
+      <div className="help-card">
+        <div className="help-icon"><CircleHelp size={18} /></div>
+        <div><strong>Need a hand?</strong><span>Ask your AI assistant anytime</span></div>
+        <ArrowRight size={16} />
+      </div>
+      <div className="profile-card-wrap">
+        <button className="profile-card" onClick={() => navigate("/settings")} title="View settings">
+          <div className="profile-avatar">RS</div>
+          <div className="profile-copy"><strong>{data.shop.owner || "Ramesh Sharma"}</strong><span>Shop Owner</span></div>
+        </button>
+        <button className="sidebar-logout-btn" title="Log out" aria-label="Log out" onClick={handleLogout}>
+          <LogOut size={18} />
+        </button>
+      </div>
     </div>
   </aside>;
 }
 
 function Header({ title }) {
   const [showNotifications, setShowNotifications] = useState(false);
+  const [showProfileMenu, setShowProfileMenu] = useState(false);
   const [search, setSearch] = useState("");
   const navigate = useNavigate();
+  const { data } = useStore();
+  const lowCount = data.products.filter(p => p.stock <= p.minStock).length;
+
+  const handleLogout = () => {
+    sessionStorage.removeItem("kirana-ledger-demo-session");
+    navigate("/login");
+  };
+
   return <header className="topbar">
     <div className="mobile-brand"><Brand compact /><span>{title}</span></div>
     <div className="header-title">{title}</div>
     <div className="header-actions">
-      <label className="global-search"><Search size={16} /><input placeholder="Search anything..." value={search} onChange={(event) => setSearch(event.target.value)} onKeyDown={(event) => event.key === "Enter" && navigate(`/inventory?search=${encodeURIComponent(search)}`)} /><kbd>⌘ K</kbd></label>
-      <div className="notification-wrap"><button className="icon-button notification-button" aria-label="Notifications" onClick={() => setShowNotifications(!showNotifications)}><Bell size={18} /><i /></button>
-        {showNotifications && <div className="notification-popover"><strong>Notifications</strong><div className="notification-item"><span className="notification-dot amber-dot" /><span><b>7 products are running low</b><small>Check your stock before it runs out.</small></span></div><div className="notification-item"><span className="notification-dot green-dot" /><span><b>Sales are looking good</b><small>You've made ₹4,850 today so far.</small></span></div></div>}
+      <label className="global-search">
+        <Search size={18} />
+        <input
+          placeholder="Search items, Udhaar, customers..."
+          value={search}
+          onChange={(event) => setSearch(event.target.value)}
+          onKeyDown={(event) => event.key === "Enter" && navigate(`/inventory?search=${encodeURIComponent(search)}`)}
+        />
+        <kbd>⌘ K</kbd>
+      </label>
+      <div className="notification-wrap">
+        <button className="icon-button notification-button" aria-label="Notifications" onClick={() => setShowNotifications(!showNotifications)}>
+          <Bell size={20} />{lowCount > 0 && <i />}
+        </button>
+        {showNotifications && (
+          <div className="notification-popover">
+            <strong>Shop Notifications</strong>
+            {lowCount > 0 && (
+              <div className="notification-item">
+                <span className="notification-dot amber-dot" />
+                <span>
+                  <b>{lowCount} products are running low</b>
+                  <small>Check your stock before it runs out.</small>
+                </span>
+              </div>
+            )}
+            <div className="notification-item">
+              <span className="notification-dot green-dot" />
+              <span>
+                <b>Sales are updated live</b>
+                <small>Gross sales today: {money(data.todaySales)}.</small>
+              </span>
+            </div>
+          </div>
+        )}
       </div>
-      <button className="header-profile" onClick={() => navigate("/settings")}><span className="profile-avatar">RS</span><ChevronDown size={14} /></button>
+      <div className="header-profile-wrap">
+        <button className="header-profile" onClick={() => setShowProfileMenu(!showProfileMenu)} aria-label="User menu">
+          <span className="profile-avatar">RS</span>
+          <ChevronDown size={16} />
+        </button>
+        {showProfileMenu && (
+          <div className="header-profile-popover">
+            <div className="profile-popover-info">
+              <strong>{data.shop.owner || "Ramesh Sharma"}</strong>
+              <small>{data.shop.name || "Sharma General Store"}</small>
+            </div>
+            <button className="profile-popover-item" onClick={() => { setShowProfileMenu(false); navigate("/settings"); }}>
+              <Settings size={16} /> Settings
+            </button>
+            <button className="profile-popover-item profile-popover-logout" onClick={handleLogout}>
+              <LogOut size={16} /> Log out
+            </button>
+          </div>
+        )}
+      </div>
     </div>
   </header>;
 }
@@ -236,52 +330,157 @@ function AppShell() {
 
 function MobileNav() {
   const items = navItems.slice(0, 5);
-  return <nav className="mobile-nav">{items.map(({ to, label, Icon }) => <NavLink key={to} to={to} className={({ isActive }) => `mobile-nav-link ${isActive ? "active" : ""}`}><Icon size={19} /><span>{label === "Assistant" ? "Ask" : label === "Inventory" ? "Stock" : label}</span></NavLink>)}</nav>;
+  return <nav className="mobile-nav">{items.map(({ to, label, Icon }) => <NavLink key={to} to={to} className={({ isActive }) => `mobile-nav-link ${isActive ? "active" : ""}`}><Icon size={20} /><span>{label === "Assistant" ? "Ask" : label === "Inventory" ? "Stock" : label}</span></NavLink>)}</nav>;
 }
 
 function PageIntro({ eyebrow, title, description, action }) {
   return <div className="page-intro"><div><div className="eyebrow">{eyebrow}</div><h1>{title}</h1>{description && <p>{description}</p>}</div>{action && <div className="intro-action">{action}</div>}</div>;
 }
 
-function Button({ children, variant = "primary", icon: Icon, onClick, className = "", type = "button" }) {
-  return <button type={type} onClick={onClick} className={`button button-${variant} ${className}`}>{Icon && <Icon size={16} />}{children}</button>;
+function Button({ children, variant = "primary", icon: Icon, onClick, className = "", type = "button", disabled = false }) {
+  return <button type={type} onClick={onClick} disabled={disabled} className={`button button-${variant} ${className}`}>{Icon && <Icon size={18} />}{children}</button>;
 }
 
 function StatCard({ label, value, note, icon: Icon, tone, trend }) {
-  return <div className="stat-card"><div className="stat-top"><span className="stat-label">{label}</span><span className={`stat-icon ${tone}`}><Icon size={18} /></span></div><div className="stat-value">{value}</div><div className="stat-note">{trend && <span className="trend-positive"><TrendingUp size={13} />{trend}</span>}{note}</div></div>;
+  return <div className="stat-card">
+    <div className="stat-top">
+      <span className="stat-label">{label}</span>
+      <span className={`stat-icon ${tone}`}><Icon size={20} /></span>
+    </div>
+    <div className="stat-value">{value}</div>
+    <div className="stat-note">
+      {trend && <span className="trend-positive"><TrendingUp size={15} />{trend}</span>}
+      {note}
+    </div>
+  </div>;
 }
 
 function Dashboard() {
   const { data } = useStore();
   const navigate = useNavigate();
   const [reorderedSuppliers, setReorderedSuppliers] = useState([]);
+  const [activeSupplierForReorder, setActiveSupplierForReorder] = useState(null);
+
   const lowProducts = data.products.filter((item) => item.stock <= item.minStock);
   const totalDue = data.customers.reduce((sum, item) => sum + item.due, 0);
+
   return <div className="dashboard-page">
-    <div className="welcome-row"><div><div className="eyebrow">TUESDAY, 28 OCTOBER 2026</div><h1>Good morning, Ramesh <span className="wave">👋</span></h1><p>Here's what's happening in your shop today.</p></div><Button icon={MessageCircle} onClick={() => navigate("/assistant")}>Open Assistant</Button></div>
+    <div className="welcome-row">
+      <div>
+        <div className="eyebrow">TUESDAY, 28 OCTOBER 2026</div>
+        <h1>Good morning, Ramesh <span className="wave">👋</span></h1>
+        <p>Here's what's happening in your shop today.</p>
+      </div>
+      <Button icon={MessageCircle} onClick={() => navigate("/assistant")}>Open Assistant</Button>
+    </div>
+
     <div className="stat-grid">
-      <StatCard label="Today's sales" value={money(data.todaySales)} note="vs. ₹4,120 yesterday" trend="+17.7%" icon={IndianRupee} tone="green" />
+      <StatCard label="Today's sales" value={money(data.todaySales)} note="Live from transactions" trend="+17.7%" icon={IndianRupee} tone="green" />
       <StatCard label="Items in stock" value={data.products.reduce((sum, item) => sum + item.stock, 0).toLocaleString("en-IN")} note={`${data.products.length} products in your catalogue`} icon={Package} tone="blue" />
       <StatCard label="Udhaar to collect" value={money(totalDue)} note={`From ${data.customers.filter((c) => c.due > 0).length} customers`} icon={Wallet} tone="amber" />
       <StatCard label="Need restocking" value={`${lowProducts.length} items`} note="A few products are running low" icon={AlertTriangle} tone="rose" />
     </div>
+
     <div className="dashboard-grid">
-      <section className="panel sales-panel"><div className="panel-heading"><div><h2>Sales overview</h2><p>Your shop is having a good week</p></div><button className="select-button">This week <ChevronDown size={14} /></button></div><SalesChart /></section>
-      <section className="panel assistant-promo"><div className="assistant-promo-head"><div className="assistant-spark"><Sparkles size={18} /></div><span className="live-pill"><i /> READY TO HELP</span></div><h2>Your shop,<br />just a message away.</h2><p>Tell your assistant what happened. It’ll take care of your stock, sales and Udhaar.</p><div className="prompt-suggestion">“Sold 5 Maggi and 2 milk”<ArrowRight size={14} /></div><Button variant="light" icon={MessageCircle} onClick={() => navigate("/assistant")}>Talk to your assistant</Button></section>
-    </div>
-    <div className="dashboard-bottom-grid">
-      <section className="panel"><div className="panel-heading"><div><h2>Recent activity</h2><p>The latest from your shop</p></div><Link className="text-link" to="/transactions">See all <ArrowRight size={14} /></Link></div><TransactionList transactions={data.transactions.slice(0, 4)} /></section>
-      <section className="panel stock-panel"><div className="panel-heading"><div><h2>Stock to watch</h2><p>Items that may need a reorder</p></div><Link className="text-link" to="/low-stock">View all <ArrowRight size={14} /></Link></div>
-        <div className="stock-watch-list">{lowProducts.slice(0, 4).map((product) => <Link to={`/inventory/${product.id}`} className="stock-watch-item" key={product.id}><ProductThumb product={product} /><span className="stock-watch-name"><strong>{product.name}</strong><small>{product.category}</small></span><span className="stock-level"><b>{product.stock}</b><small>{product.unit}s left</small></span></Link>)}</div>
+      <section className="panel sales-panel">
+        <div className="panel-heading">
+          <div><h2>Sales overview</h2><p>Your shop activity this week</p></div>
+          <button className="select-button">This week <ChevronDown size={16} /></button>
+        </div>
+        <SalesChart />
+      </section>
+      <section className="panel assistant-promo">
+        <div className="assistant-promo-head">
+          <div className="assistant-spark"><Sparkles size={20} /></div>
+          <span className="live-pill"><i /> READY TO HELP</span>
+        </div>
+        <h2>Your shop,<br />just a message away.</h2>
+        <p>Tell your assistant what happened. It will take care of your stock, sales, and Udhaar ledger.</p>
+        <div className="prompt-suggestion" onClick={() => navigate("/assistant")}>
+          <span>“Sold 5 Maggi and 2 milk”</span>
+          <ArrowRight size={16} />
+        </div>
+        <Button variant="light" icon={MessageCircle} onClick={() => navigate("/assistant")}>Talk to your assistant</Button>
       </section>
     </div>
-    <section className="panel supplier-panel"><div className="panel-heading"><div><h2>Suppliers & reordering</h2><p>Keep your shelves stocked with the people who know your shop.</p></div><button className="select-button" onClick={() => navigate("/inventory")}><Package size={14} /> View low stock</button></div><div className="supplier-list">{data.suppliers.map((supplier) => <div className="supplier-row" key={supplier.id}><span className={`customer-avatar avatar-${supplier.color}`}>{supplier.initials}</span><span className="supplier-copy"><strong>{supplier.name}</strong><small>{supplier.category} · {supplier.delivery}</small></span><span className="supplier-products">{supplier.products} products</span><button className={`button ${reorderedSuppliers.includes(supplier.id) ? "button-secondary reorder-done" : "button-secondary"}`} onClick={() => setReorderedSuppliers((current) => current.includes(supplier.id) ? current : [...current, supplier.id])}>{reorderedSuppliers.includes(supplier.id) ? <><Check size={14} /> Requested</> : <><ArrowRight size={14} /> Reorder</>}</button></div>)}</div></section>
+
+    <div className="dashboard-bottom-grid">
+      <section className="panel">
+        <div className="panel-heading">
+          <div><h2>Recent activity</h2><p>The latest transactions from your shop</p></div>
+          <Link className="text-link" to="/transactions">See all <ArrowRight size={16} /></Link>
+        </div>
+        <TransactionList transactions={data.transactions.slice(0, 4)} />
+      </section>
+      <section className="panel stock-panel">
+        <div className="panel-heading">
+          <div><h2>Stock to watch</h2><p>Items that may need a supplier reorder</p></div>
+          <Link className="text-link" to="/low-stock">View all <ArrowRight size={16} /></Link>
+        </div>
+        <div className="stock-watch-list">
+          {lowProducts.slice(0, 4).map((product) => (
+            <Link to={`/inventory/${product.id}`} className="stock-watch-item" key={product.id}>
+              <ProductThumb product={product} />
+              <span className="stock-watch-name"><strong>{product.name}</strong><small>{product.category}</small></span>
+              <span className="stock-level"><b>{product.stock}</b><small>{product.unit}s left</small></span>
+            </Link>
+          ))}
+        </div>
+      </section>
+    </div>
+
+    <section className="panel supplier-panel">
+      <div className="panel-heading">
+        <div>
+          <h2>Suppliers & WhatsApp Reordering</h2>
+          <p>Dispatch official restock orders directly to suppliers via WhatsApp Cloud API.</p>
+        </div>
+        <button className="select-button" onClick={() => navigate("/low-stock")}><Package size={16} /> View low stock</button>
+      </div>
+      <div className="supplier-list">
+        {data.suppliers.map((supplier) => (
+          <div className="supplier-row" key={supplier.id}>
+            <span className={`customer-avatar avatar-${supplier.color}`}>{supplier.initials}</span>
+            <span className="supplier-copy">
+              <strong>{supplier.name}</strong>
+              <small>{supplier.category} · {supplier.phone}</small>
+            </span>
+            <span className="supplier-products">{supplier.delivery}</span>
+            <button
+              className={`button ${reorderedSuppliers.includes(supplier.id) ? "button-secondary reorder-done" : "button-secondary"}`}
+              onClick={() => setActiveSupplierForReorder(supplier)}
+            >
+              {reorderedSuppliers.includes(supplier.id) ? <><Check size={16} /> Reordered</> : <><MessageCircle size={16} /> WhatsApp Reorder</>}
+            </button>
+          </div>
+        ))}
+      </div>
+    </section>
+
+    {activeSupplierForReorder && (
+      <WhatsAppReorderModal
+        supplier={activeSupplierForReorder}
+        onClose={() => setActiveSupplierForReorder(null)}
+        onSent={(id) => setReorderedSuppliers((curr) => [...curr, id])}
+      />
+    )}
   </div>;
 }
 
 function SalesChart() {
   const heights = [42, 59, 48, 73, 62, 88, 67, 55, 76, 63, 92, 72, 81, 60, 75, 96, 65, 82, 70, 87, 67, 79, 58, 91, 74, 84, 69, 98];
-  return <div className="chart-area"><div className="chart-y-labels"><span>₹6k</span><span>₹4k</span><span>₹2k</span><span>₹0</span></div><div className="chart-content"><div className="chart-gridlines"><i /><i /><i /><i /></div><div className="chart-bars">{heights.map((height, index) => <div key={index} className={`chart-bar ${index === 25 ? "chart-bar-highlight" : ""}`} style={{ height: `${height}%` }} title={`₹${(height * 55).toLocaleString("en-IN")}`} />)}</div><div className="chart-x-labels"><span>Mon</span><span>Tue</span><span>Wed</span><span>Thu</span><span>Fri</span><span>Sat</span><span>Sun</span></div></div></div>;
+  return <div className="chart-area">
+    <div className="chart-y-labels"><span>₹6k</span><span>₹4k</span><span>₹2k</span><span>₹0</span></div>
+    <div className="chart-content">
+      <div className="chart-gridlines"><i /><i /><i /><i /></div>
+      <div className="chart-bars">
+        {heights.map((height, index) => (
+          <div key={index} className={`chart-bar ${index === 25 ? "chart-bar-highlight" : ""}`} style={{ height: `${height}%` }} title={`₹${(height * 55).toLocaleString("en-IN")}`} />
+        ))}
+      </div>
+      <div className="chart-x-labels"><span>Mon</span><span>Tue</span><span>Wed</span><span>Thu</span><span>Fri</span><span>Sat</span><span>Sun</span></div>
+    </div>
+  </div>;
 }
 
 function ProductThumb({ product, large = false }) {
@@ -290,7 +489,153 @@ function ProductThumb({ product, large = false }) {
 }
 
 function TransactionList({ transactions }) {
-  return <div className="transaction-list">{transactions.map((transaction) => <div className="transaction-row" key={transaction.id}><span className={`transaction-icon transaction-${transaction.type}`}>{transaction.type === "payment" ? <ArrowDownLeft size={16} /> : transaction.type === "credit" ? <Clock3 size={16} /> : <ShoppingBag size={16} />}</span><span className="transaction-copy"><strong>{transaction.title}</strong><small>{transaction.detail}</small></span><span className="transaction-amount"><strong className={transaction.type === "payment" ? "amount-green" : ""}>{transaction.type === "credit" ? "+" : ""}{money(transaction.amount)}</strong><small>{transaction.time}</small></span></div>)}</div>;
+  return <div className="transaction-list">
+    {transactions.map((transaction) => (
+      <div className="transaction-row" key={transaction.id}>
+        <span className={`transaction-icon transaction-${transaction.type}`}>
+          {transaction.type === "payment" ? <ArrowDownLeft size={18} /> : transaction.type === "credit" ? <Clock3 size={18} /> : <ShoppingBag size={18} />}
+        </span>
+        <span className="transaction-copy"><strong>{transaction.title}</strong><small>{transaction.detail}</small></span>
+        <span className="transaction-amount">
+          <strong className={transaction.type === "payment" ? "amount-green" : ""}>{transaction.type === "credit" ? "+" : ""}{money(transaction.amount)}</strong>
+          <small>{transaction.time}</small>
+        </span>
+      </div>
+    ))}
+  </div>;
+}
+
+function WhatsAppReorderModal({ supplier, onClose, onSent }) {
+  const [phone, setPhone] = useState(supplier?.phone || "9876543210");
+  const [message, setMessage] = useState("");
+  const [loading, setLoading] = useState(true);
+  const [sending, setSending] = useState(false);
+  const [statusInfo, setStatusInfo] = useState(null);
+  const [feedback, setFeedback] = useState(null);
+
+  useEffect(() => {
+    let isMounted = true;
+    async function loadPreview() {
+      try {
+        const [previewRes, statusRes] = await Promise.all([
+          fetch(`${API_BASE}/whatsapp/preview/reorder?supplier_name=${encodeURIComponent(supplier?.name || "")}&supplier_phone=${encodeURIComponent(phone)}`).then((r) => (r.ok ? r.json() : null)),
+          fetch(`${API_BASE}/whatsapp/status`).then((r) => (r.ok ? r.json() : null)),
+        ]);
+        if (isMounted) {
+          if (previewRes?.message_text) {
+            setMessage(previewRes.message_text);
+          }
+          if (statusRes) {
+            setStatusInfo(statusRes);
+          }
+        }
+      } catch (err) {
+        console.error("Failed to load WhatsApp preview:", err);
+      } finally {
+        if (isMounted) setLoading(false);
+      }
+    }
+    loadPreview();
+    return () => { isMounted = false; };
+  }, []);
+
+  const handleSendCloudApi = async () => {
+    setSending(true);
+    setFeedback(null);
+    try {
+      const res = await fetch(`${API_BASE}/whatsapp/send`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ recipient_phone: phone, message_text: message }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        setFeedback({ type: "success", text: `✅ Order dispatched to ${data.recipient} via Meta WhatsApp Business Cloud API! (ID: ${data.message_id})` });
+        if (onSent && supplier?.id) onSent(supplier.id);
+      } else {
+        if (data.fallback_url) {
+          window.open(data.fallback_url, "_blank", "noopener,noreferrer");
+          setFeedback({ type: "info", text: "📱 Meta WhatsApp Cloud API credentials unconfigured in environment — opened in WhatsApp Web / Desktop click-to-chat!" });
+        } else {
+          setFeedback({ type: "error", text: data.error || data.message || "Failed to dispatch WhatsApp message." });
+        }
+      }
+    } catch (err) {
+      setFeedback({ type: "error", text: "Could not connect to WhatsApp dispatch service." });
+    } finally {
+      setSending(false);
+    }
+  };
+
+  const handleOpenWhatsAppWeb = () => {
+    const cleanDigits = phone.replace(/\D/g, "");
+    const intlPhone = cleanDigits.length === 10 ? `91${cleanDigits}` : cleanDigits;
+    const url = `https://wa.me/${intlPhone}?text=${encodeURIComponent(message)}`;
+    window.open(url, "_blank", "noopener,noreferrer");
+    if (onSent && supplier?.id) onSent(supplier.id);
+  };
+
+  return (
+    <Modal title={`WhatsApp Restock Order — ${supplier?.name || "Supplier"}`} onClose={onClose}>
+      <div className="whatsapp-modal-content">
+        <div className="whatsapp-modal-tag"><i /> WhatsApp Business Cloud API</div>
+
+        {statusInfo && (
+          <div className={`whatsapp-status-banner ${statusInfo.configured ? "configured" : "unconfigured"}`}>
+            {statusInfo.configured ? (
+              <span>⚡ <strong>Meta Cloud API Active</strong> (v{statusInfo.api_version})</span>
+            ) : (
+              <span>ℹ️ <strong>Meta Cloud API Unconfigured</strong> (Using click-to-chat fallback link)</span>
+            )}
+          </div>
+        )}
+
+        <label className="form-field full-field">
+          Supplier Phone Number
+          <input
+            value={phone}
+            onChange={(e) => setPhone(e.target.value)}
+            placeholder="+91 98765 43210"
+            required
+          />
+        </label>
+
+        <label className="form-field full-field">
+          Order Message Draft (Live low-stock calculation)
+          <textarea
+            value={message}
+            onChange={(e) => setMessage(e.target.value)}
+            rows={7}
+            placeholder={loading ? "Generating restock order from current inventory..." : "Type order message..."}
+          />
+        </label>
+
+        {feedback && (
+          <div
+            className={`whatsapp-status-banner ${feedback.type === "success" ? "configured" : feedback.type === "info" ? "unconfigured" : ""}`}
+            style={{ color: feedback.type === "error" ? "var(--red)" : undefined }}
+          >
+            {feedback.text}
+          </div>
+        )}
+
+        <div className="form-actions full-field" style={{ flexWrap: "wrap", gap: "8px" }}>
+          <Button variant="secondary" onClick={onClose}>Close</Button>
+          <Button variant="secondary" icon={MessageCircle} onClick={handleOpenWhatsAppWeb}>
+            Open in WhatsApp Web
+          </Button>
+          <button
+            type="button"
+            className="button whatsapp-button"
+            onClick={handleSendCloudApi}
+            disabled={sending || loading || !phone.trim() || !message.trim()}
+          >
+            <Send size={16} /> {sending ? "Sending..." : "Send via Meta Cloud API"}
+          </button>
+        </div>
+      </div>
+    </Modal>
+  );
 }
 
 function Inventory() {
@@ -301,6 +646,7 @@ function Inventory() {
   const [showAdd, setShowAdd] = useState(false);
   const categories = ["All categories", ...new Set(data.products.map((product) => product.category))];
   const filtered = data.products.filter((product) => (product.name.toLowerCase().includes(query.toLowerCase()) || product.sku.toLowerCase().includes(query.toLowerCase())) && (category === "All categories" || product.category === category));
+
   const addProduct = (event) => {
     event.preventDefault();
     const form = new FormData(event.currentTarget);
@@ -308,17 +654,79 @@ function Inventory() {
     setData((current) => ({ ...current, products: [product, ...current.products] }));
     setShowAdd(false);
   };
-  return <div><PageIntro eyebrow="YOUR CATALOGUE" title="Inventory" description={`${data.products.length} products · Keep an eye on what’s on your shelves.`} action={<Button icon={Plus} onClick={() => setShowAdd(true)}>Add product</Button>} />
-    <section className="panel table-panel"><div className="table-toolbar"><label className="table-search"><Search size={16} /><input placeholder="Search products..." value={query} onChange={(event) => setQuery(event.target.value)} /></label><div className="toolbar-right"><select className="select-button native-select" value={category} onChange={(event) => setCategory(event.target.value)}>{categories.map((item) => <option key={item}>{item}</option>)}</select><button className="select-button" onClick={() => setCategory("All categories")}><Filter size={14} /> Filters</button></div></div>
-      <div className="table-scroll"><table><thead><tr><th>PRODUCT</th><th>SKU</th><th>CATEGORY</th><th>PRICE</th><th>IN STOCK</th><th>STATUS</th><th /></tr></thead><tbody>{filtered.map((product) => <tr key={product.id} className="clickable-row" onClick={() => window.location.assign(`/inventory/${product.id}`)}><td><div className="product-cell"><ProductThumb product={product} /><span><strong>{product.name}</strong><small>per {product.unit}</small></span></div></td><td className="muted-cell">{product.sku}</td><td><span className="category-chip">{product.category}</span></td><td className="strong-cell">{money(product.price)}</td><td><span className="stock-value">{product.stock} <small>{product.unit}s</small></span></td><td><StatusBadge low={product.stock <= product.minStock}>{product.stock <= product.minStock ? "Low stock" : "In stock"}</StatusBadge></td><td><button className="row-more" aria-label="More options"><Ellipsis size={18} /></button></td></tr>)}</tbody></table></div>
+
+  return <div>
+    <PageIntro
+      eyebrow="YOUR CATALOGUE"
+      title="Inventory"
+      description={`${data.products.length} products · Real-time stock levels with atomic updates.`}
+      action={<Button icon={Plus} onClick={() => setShowAdd(true)}>Add product</Button>}
+    />
+    <section className="panel table-panel">
+      <div className="table-toolbar">
+        <label className="table-search">
+          <Search size={18} />
+          <input placeholder="Search products..." value={query} onChange={(event) => setQuery(event.target.value)} />
+        </label>
+        <div className="toolbar-right">
+          <select className="select-button native-select" value={category} onChange={(event) => setCategory(event.target.value)}>
+            {categories.map((item) => <option key={item}>{item}</option>)}
+          </select>
+          <button className="select-button" onClick={() => setCategory("All categories")}><Filter size={16} /> Filters</button>
+        </div>
+      </div>
+      <div className="table-scroll">
+        <table>
+          <thead>
+            <tr><th>PRODUCT</th><th>SKU</th><th>CATEGORY</th><th>PRICE</th><th>IN STOCK</th><th>STATUS</th><th /></tr>
+          </thead>
+          <tbody>
+            {filtered.map((product) => (
+              <tr key={product.id} className="clickable-row" onClick={() => window.location.assign(`/inventory/${product.id}`)}>
+                <td><div className="product-cell"><ProductThumb product={product} /><span><strong>{product.name}</strong><small>per {product.unit}</small></span></div></td>
+                <td className="muted-cell">{product.sku}</td>
+                <td><span className="category-chip">{product.category}</span></td>
+                <td className="strong-cell">{money(product.price)}</td>
+                <td><span className="stock-value">{product.stock} <small>{product.unit}s</small></span></td>
+                <td><StatusBadge low={product.stock <= product.minStock}>{product.stock <= product.minStock ? "Low stock" : "In stock"}</StatusBadge></td>
+                <td><button className="row-more" aria-label="More options"><Ellipsis size={18} /></button></td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
       {filtered.length === 0 && <EmptyState title="No products found" message="Try a different search or category." />}
-      <div className="table-footer"><span>Showing <strong>{filtered.length}</strong> of <strong>{data.products.length}</strong> products</span><div className="pagination"><button disabled><ChevronLeft size={15} /></button><button className="page-current">1</button><button disabled><ChevronRight size={15} /></button></div></div>
+      <div className="table-footer">
+        <span>Showing <strong>{filtered.length}</strong> of <strong>{data.products.length}</strong> products</span>
+        <div className="pagination">
+          <button disabled><ChevronLeft size={16} /></button>
+          <button className="page-current">1</button>
+          <button disabled><ChevronRight size={16} /></button>
+        </div>
+      </div>
     </section>
-    {showAdd && <Modal title="Add a product" onClose={() => setShowAdd(false)}><form className="form-grid" onSubmit={addProduct}><label className="form-field full-field">Product name<input name="name" required placeholder="e.g. Amul Gold Milk" /></label><label className="form-field">Category<select name="category"><option>Grocery</option><option>Dairy</option><option>Snacks</option><option>Essentials</option><option>Household</option></select></label><label className="form-field">Unit<select name="unit"><option>packet</option><option>piece</option><option>kg</option><option>litre</option><option>pack</option></select></label><label className="form-field">Selling price<input name="price" type="number" min="0" required placeholder="₹ 0.00" /></label><label className="form-field">Current stock<input name="stock" type="number" min="0" required placeholder="0" /></label><label className="form-field full-field">Low stock alert at<input name="minStock" type="number" min="0" required defaultValue="10" /></label><div className="form-actions full-field"><Button variant="secondary" onClick={() => setShowAdd(false)}>Cancel</Button><Button type="submit">Add product</Button></div></form></Modal>}
+    {showAdd && (
+      <Modal title="Add a product" onClose={() => setShowAdd(false)}>
+        <form className="form-grid" onSubmit={addProduct}>
+          <label className="form-field full-field">Product name<input name="name" required placeholder="e.g. Amul Gold Milk" /></label>
+          <label className="form-field">Category<select name="category"><option>Grocery</option><option>Dairy</option><option>Snacks</option><option>Essentials</option><option>Household</option></select></label>
+          <label className="form-field">Unit<select name="unit"><option>packet</option><option>piece</option><option>kg</option><option>litre</option><option>pack</option></select></label>
+          <label className="form-field">Selling price<input name="price" type="number" min="0" required placeholder="₹ 0.00" /></label>
+          <label className="form-field">Current stock<input name="stock" type="number" min="0" required placeholder="0" /></label>
+          <label className="form-field full-field">Low stock alert at<input name="minStock" type="number" min="0" required defaultValue="10" /></label>
+          <div className="form-actions full-field">
+            <Button variant="secondary" onClick={() => setShowAdd(false)}>Cancel</Button>
+            <Button type="submit">Add product</Button>
+          </div>
+        </form>
+      </Modal>
+    )}
   </div>;
 }
 
-function StatusBadge({ children, low = false }) { return <span className={`status-badge ${low ? "status-low" : "status-good"}`}><i />{children}</span>; }
+function StatusBadge({ children, low = false }) {
+  return <span className={`status-badge ${low ? "status-low" : "status-good"}`}><i />{children}</span>;
+}
 
 function ProductDetail() {
   const { id } = useParams();
@@ -326,8 +734,52 @@ function ProductDetail() {
   const product = data.products.find((item) => item.id === id);
   const [adjusting, setAdjusting] = useState(false);
   if (!product) return <EmptyState title="Product not found" message="This item may have been removed from your inventory." />;
-  const adjust = (event) => { event.preventDefault(); const amount = Number(new FormData(event.currentTarget).get("amount")); updateProduct(id, (item) => ({ ...item, stock: Math.max(0, item.stock + amount) })); setAdjusting(false); };
-  return <div><Link className="back-link" to="/inventory"><ArrowLeft size={15} /> Back to inventory</Link><PageIntro eyebrow={product.category.toUpperCase()} title={product.name} description={`Product details · ${product.sku}`} action={<Button variant="secondary" icon={Plus} onClick={() => setAdjusting(true)}>Adjust stock</Button>} /><div className="detail-grid"><section className="panel product-detail-card"><div className="product-detail-head"><ProductThumb product={product} large /><div><h2>{product.name}</h2><span className="category-chip">{product.category}</span></div></div><div className="detail-stats"><div><span>SELLING PRICE</span><strong>{money(product.price)} <small>/ {product.unit}</small></strong></div><div><span>CURRENT STOCK</span><strong>{product.stock} <small>{product.unit}s</small></strong></div><div><span>LOW STOCK ALERT</span><strong>{product.minStock} <small>{product.unit}s</small></strong></div><div><span>STOCK STATUS</span><StatusBadge low={product.stock <= product.minStock}>{product.stock <= product.minStock ? "Needs restock" : "Healthy"}</StatusBadge></div></div></section><section className="panel"><h2 className="panel-title">Stock activity</h2><div className="activity-empty"><div className="empty-icon"><Boxes size={20} /></div><strong>You're all caught up</strong><span>Stock updates from your assistant will show here.</span></div></section></div>{adjusting && <Modal title="Adjust stock" onClose={() => setAdjusting(false)}><form className="form-grid" onSubmit={adjust}><div className="full-field stock-current"><span>Current stock</span><strong>{product.stock} {product.unit}s</strong></div><label className="form-field full-field">Adjustment<input name="amount" type="number" required placeholder="Use a minus sign to remove stock" /></label><div className="form-actions full-field"><Button variant="secondary" onClick={() => setAdjusting(false)}>Cancel</Button><Button type="submit">Save adjustment</Button></div></form></Modal>}</div>;
+
+  const adjust = (event) => {
+    event.preventDefault();
+    const amount = Number(new FormData(event.currentTarget).get("amount"));
+    updateProduct(id, (item) => ({ ...item, stock: Math.max(0, item.stock + amount) }));
+    setAdjusting(false);
+  };
+
+  return <div>
+    <Link className="back-link" to="/inventory"><ArrowLeft size={16} /> Back to inventory</Link>
+    <PageIntro eyebrow={product.category.toUpperCase()} title={product.name} description={`Product details · ${product.sku}`} action={<Button variant="secondary" icon={Plus} onClick={() => setAdjusting(true)}>Adjust stock</Button>} />
+    <div className="detail-grid">
+      <section className="panel product-detail-card">
+        <div className="product-detail-head">
+          <ProductThumb product={product} large />
+          <div><h2>{product.name}</h2><span className="category-chip">{product.category}</span></div>
+        </div>
+        <div className="detail-stats">
+          <div><span>SELLING PRICE</span><strong>{money(product.price)} <small>/ {product.unit}</small></strong></div>
+          <div><span>CURRENT STOCK</span><strong>{product.stock} <small>{product.unit}s</small></strong></div>
+          <div><span>LOW STOCK ALERT</span><strong>{product.minStock} <small>{product.unit}s</small></strong></div>
+          <div><span>STOCK STATUS</span><StatusBadge low={product.stock <= product.minStock}>{product.stock <= product.minStock ? "Needs restock" : "Healthy"}</StatusBadge></div>
+        </div>
+      </section>
+      <section className="panel">
+        <h2 className="panel-title" style={{ padding: "18px 20px" }}>Stock activity</h2>
+        <div className="activity-empty">
+          <div className="empty-icon"><Boxes size={24} /></div>
+          <strong>Live inventory tracking</strong>
+          <span>Stock updates from your conversational assistant will show here.</span>
+        </div>
+      </section>
+    </div>
+    {adjusting && (
+      <Modal title="Adjust stock" onClose={() => setAdjusting(false)}>
+        <form className="form-grid" onSubmit={adjust}>
+          <div className="full-field stock-current"><span>Current stock</span><strong>{product.stock} {product.unit}s</strong></div>
+          <label className="form-field full-field">Adjustment<input name="amount" type="number" required placeholder="Use a minus sign to remove stock" /></label>
+          <div className="form-actions full-field">
+            <Button variant="secondary" onClick={() => setAdjusting(false)}>Cancel</Button>
+            <Button type="submit">Save adjustment</Button>
+          </div>
+        </form>
+      </Modal>
+    )}
+  </div>;
 }
 
 function Customers() {
@@ -335,15 +787,61 @@ function Customers() {
   const [query, setQuery] = useState("");
   const [showAdd, setShowAdd] = useState(false);
   const filtered = data.customers.filter((customer) => customer.name.toLowerCase().includes(query.toLowerCase()) || customer.phone.includes(query));
+
   const addCustomer = (event) => {
-    event.preventDefault(); const form = new FormData(event.currentTarget); const name = form.get("name");
+    event.preventDefault();
+    const form = new FormData(event.currentTarget);
+    const name = form.get("name");
     const initials = name.trim().split(/\s+/).slice(0, 2).map((word) => word[0]).join("").toUpperCase();
     const customer = { id: `c${Date.now()}`, name, phone: form.get("phone"), due: 0, lastActive: "Just now", initials, color: "mint" };
-    setData((current) => ({ ...current, customers: [customer, ...current.customers] })); setShowAdd(false);
+    setData((current) => ({ ...current, customers: [customer, ...current.customers] }));
+    setShowAdd(false);
   };
-  return <div><PageIntro eyebrow="YOUR COMMUNITY" title="Customers" description="Good relationships make a good business. Keep them close." action={<Button icon={Plus} onClick={() => setShowAdd(true)}>Add customer</Button>} /><div className="customer-summary"><div className="summary-mini"><span className="summary-icon tone-green"><Users size={17} /></span><span><small>All customers</small><strong>{data.customers.length}</strong></span></div><div className="summary-mini"><span className="summary-icon tone-amber"><Wallet size={17} /></span><span><small>With outstanding Udhaar</small><strong>{data.customers.filter((item) => item.due > 0).length}</strong></span></div><div className="summary-mini"><span className="summary-icon tone-blue"><IndianRupee size={17} /></span><span><small>Total to collect</small><strong>{money(data.customers.reduce((sum, item) => sum + item.due, 0))}</strong></span></div></div>
-    <section className="panel table-panel"><div className="table-toolbar"><label className="table-search"><Search size={16} /><input placeholder="Search customers..." value={query} onChange={(event) => setQuery(event.target.value)} /></label><button className="select-button"><ListFilter size={14} /> Filters</button></div><div className="table-scroll"><table><thead><tr><th>CUSTOMER</th><th>PHONE</th><th>OUTSTANDING</th><th>LAST ACTIVE</th><th /></tr></thead><tbody>{filtered.map((customer) => <tr key={customer.id} className="clickable-row" onClick={() => window.location.assign(`/customers/${customer.id}`)}><td><div className="customer-cell"><span className={`customer-avatar avatar-${customer.color}`}>{customer.initials}</span><strong>{customer.name}</strong></div></td><td className="muted-cell">{customer.phone}</td><td className={customer.due ? "due-value" : "muted-cell"}>{customer.due ? money(customer.due) : "All settled"}</td><td className="muted-cell">{customer.lastActive}</td><td><button className="row-more" aria-label="More options"><Ellipsis size={18} /></button></td></tr>)}</tbody></table></div><div className="table-footer"><span>Showing <strong>{filtered.length}</strong> customers</span></div></section>
-    {showAdd && <Modal title="Add a customer" onClose={() => setShowAdd(false)}><form className="form-grid" onSubmit={addCustomer}><label className="form-field full-field">Customer name<input name="name" required placeholder="Full name" /></label><label className="form-field full-field">Mobile number<input name="phone" type="tel" required placeholder="+91 98765 43210" /></label><div className="form-actions full-field"><Button variant="secondary" onClick={() => setShowAdd(false)}>Cancel</Button><Button type="submit">Add customer</Button></div></form></Modal>}
+
+  return <div>
+    <PageIntro eyebrow="YOUR COMMUNITY" title="Customers" description="Good relationships make a good business. Keep customer balances clear." action={<Button icon={Plus} onClick={() => setShowAdd(true)}>Add customer</Button>} />
+    <div className="customer-summary">
+      <div className="summary-mini"><span className="summary-icon tone-green"><Users size={20} /></span><span><small>All customers</small><strong>{data.customers.length}</strong></span></div>
+      <div className="summary-mini"><span className="summary-icon tone-amber"><Wallet size={20} /></span><span><small>With outstanding Udhaar</small><strong>{data.customers.filter((item) => item.due > 0).length}</strong></span></div>
+      <div className="summary-mini"><span className="summary-icon tone-blue"><IndianRupee size={20} /></span><span><small>Total to collect</small><strong>{money(data.customers.reduce((sum, item) => sum + item.due, 0))}</strong></span></div>
+    </div>
+    <section className="panel table-panel">
+      <div className="table-toolbar">
+        <label className="table-search"><Search size={18} /><input placeholder="Search customers..." value={query} onChange={(event) => setQuery(event.target.value)} /></label>
+        <button className="select-button"><ListFilter size={16} /> Filters</button>
+      </div>
+      <div className="table-scroll">
+        <table>
+          <thead>
+            <tr><th>CUSTOMER</th><th>PHONE</th><th>OUTSTANDING</th><th>LAST ACTIVE</th><th /></tr>
+          </thead>
+          <tbody>
+            {filtered.map((customer) => (
+              <tr key={customer.id} className="clickable-row" onClick={() => window.location.assign(`/customers/${customer.id}`)}>
+                <td><div className="customer-cell"><span className={`customer-avatar avatar-${customer.color}`}>{customer.initials}</span><strong>{customer.name}</strong></div></td>
+                <td className="muted-cell">{customer.phone}</td>
+                <td className={customer.due ? "due-value" : "muted-cell"}>{customer.due ? money(customer.due) : "All settled"}</td>
+                <td className="muted-cell">{customer.lastActive}</td>
+                <td><button className="row-more" aria-label="More options"><Ellipsis size={18} /></button></td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <div className="table-footer"><span>Showing <strong>{filtered.length}</strong> customers</span></div>
+    </section>
+    {showAdd && (
+      <Modal title="Add a customer" onClose={() => setShowAdd(false)}>
+        <form className="form-grid" onSubmit={addCustomer}>
+          <label className="form-field full-field">Customer name<input name="name" required placeholder="Full name" /></label>
+          <label className="form-field full-field">Mobile number<input name="phone" type="tel" required placeholder="+91 98765 43210" /></label>
+          <div className="form-actions full-field">
+            <Button variant="secondary" onClick={() => setShowAdd(false)}>Cancel</Button>
+            <Button type="submit">Add customer</Button>
+          </div>
+        </form>
+      </Modal>
+    )}
   </div>;
 }
 
@@ -354,20 +852,122 @@ function CustomerDetail() {
   const [payment, setPayment] = useState(false);
   const [amount, setAmount] = useState("");
   if (!customer) return <EmptyState title="Customer not found" message="This customer may have been removed." />;
+
   const pay = (event) => {
-    event.preventDefault(); const paid = Number(amount); if (paid <= 0) return;
-    setData((current) => ({ ...current, customers: current.customers.map((item) => item.id === id ? { ...item, due: Math.max(0, item.due - paid) } : item) }));
-    addTransaction({ customerId: id, title: "Udhaar payment received", detail: `${customer.name} · Cash`, amount: paid, type: "payment" }); setPayment(false); setAmount("");
+    event.preventDefault();
+    const paid = Number(amount);
+    if (paid <= 0) return;
+    setData((current) => ({
+      ...current,
+      customers: current.customers.map((item) => item.id === id ? { ...item, due: Math.max(0, item.due - paid) } : item)
+    }));
+    addTransaction({ customerId: id, title: "Udhaar payment received", detail: `${customer.name} · Cash`, amount: paid, type: "payment" });
+    setPayment(false);
+    setAmount("");
   };
+
   const records = data.transactions.filter((item) => item.customerId === id);
-  return <div><Link className="back-link" to="/customers"><ArrowLeft size={15} /> Back to customers</Link><div className="customer-profile-hero panel"><span className={`customer-avatar customer-avatar-xl avatar-${customer.color}`}>{customer.initials}</span><div className="customer-hero-copy"><h1>{customer.name}</h1><p>{customer.phone} <span>·</span> Customer since January 2025</p></div><Button icon={IndianRupee} variant="secondary" onClick={() => setPayment(true)}>Record payment</Button></div><div className="detail-grid customer-detail-grid"><section className="panel udhaar-balance-card"><span>OUTSTANDING BALANCE</span><strong>{money(customer.due)}</strong><p>{customer.due ? "A gentle reminder goes a long way." : "All settled up — what a lovely customer."}</p><Link to="/udhaar" className="text-link">View Udhaar book <ArrowRight size={14} /></Link></section><section className="panel"><div className="panel-heading"><div><h2>Recent activity</h2><p>Transactions for {customer.name.split(" ")[0]}</p></div></div>{records.length ? <TransactionList transactions={records} /> : <div className="activity-empty"><strong>No activity yet</strong><span>Transactions with this customer will appear here.</span></div>}</section></div>{payment && <Modal title="Record a payment" onClose={() => setPayment(false)}><form className="form-grid" onSubmit={pay}><p className="full-field modal-copy">Record a payment from <strong>{customer.name}</strong>. They owe {money(customer.due)}.</p><label className="form-field full-field">Amount received<input type="number" min="1" max={customer.due} value={amount} onChange={(event) => setAmount(event.target.value)} required placeholder="₹ 0.00" /></label><div className="form-actions full-field"><Button variant="secondary" onClick={() => setPayment(false)}>Cancel</Button><Button type="submit">Record payment</Button></div></form></Modal>}</div>;
+
+  return <div>
+    <Link className="back-link" to="/customers"><ArrowLeft size={16} /> Back to customers</Link>
+    <div className="customer-profile-hero panel">
+      <span className={`customer-avatar customer-avatar-xl avatar-${customer.color}`}>{customer.initials}</span>
+      <div className="customer-hero-copy">
+        <h1>{customer.name}</h1>
+        <p>{customer.phone} <span>·</span> Customer account active</p>
+      </div>
+      <Button icon={IndianRupee} variant="secondary" onClick={() => setPayment(true)}>Record payment</Button>
+    </div>
+    <div className="detail-grid customer-detail-grid">
+      <section className="panel udhaar-balance-card">
+        <span>OUTSTANDING BALANCE</span>
+        <strong>{money(customer.due)}</strong>
+        <p>{customer.due ? "Send a friendly WhatsApp reminder or record repayment." : "All settled up — no outstanding balance."}</p>
+        <Link to="/udhaar" className="text-link">View Udhaar book <ArrowRight size={16} /></Link>
+      </section>
+      <section className="panel">
+        <div className="panel-heading" style={{ padding: "18px 20px" }}>
+          <div><h2>Recent activity</h2><p>Transactions for {customer.name.split(" ")[0]}</p></div>
+        </div>
+        {records.length ? <TransactionList transactions={records} /> : <div className="activity-empty"><strong>No activity yet</strong><span>Transactions with this customer will appear here.</span></div>}
+      </section>
+    </div>
+    {payment && (
+      <Modal title="Record a payment" onClose={() => setPayment(false)}>
+        <form className="form-grid" onSubmit={pay}>
+          <p className="full-field modal-copy">Record a payment from <strong>{customer.name}</strong>. Current debt is {money(customer.due)}.</p>
+          <label className="form-field full-field">Amount received<input type="number" min="1" max={customer.due} value={amount} onChange={(event) => setAmount(event.target.value)} required placeholder="₹ 0.00" /></label>
+          <div className="form-actions full-field">
+            <Button variant="secondary" onClick={() => setPayment(false)}>Cancel</Button>
+            <Button type="submit">Record payment</Button>
+          </div>
+        </form>
+      </Modal>
+    )}
+  </div>;
 }
 
 function Udhaar() {
   const { data } = useStore();
   const totalDue = data.customers.reduce((sum, item) => sum + item.due, 0);
   const dueCustomers = data.customers.filter((item) => item.due > 0).sort((a, b) => b.due - a.due);
-  return <div><PageIntro eyebrow="CUSTOMER CREDIT" title="Udhaar book" description="A clear picture of what’s owed, and who’s got your back." action={<Button icon={MessageCircle} onClick={() => window.location.assign("/assistant")}>Ask your assistant</Button>} /><div className="udhaar-overview"><div className="udhaar-total"><span className="udhaar-total-icon"><Wallet size={19} /></span><span><small>Total outstanding</small><strong>{money(totalDue)}</strong><em>Across {dueCustomers.length} customers</em></span><div className="udhaar-trend"><TrendingDown size={15} /> 8% this month</div></div><div className="udhaar-stat"><span>Collected this month</span><strong>₹8,450</strong><small><span className="trend-positive">↑ 12%</span> vs last month</small></div><div className="udhaar-stat"><span>Average credit</span><strong>₹842</strong><small>Per customer</small></div></div><section className="panel table-panel"><div className="panel-heading panel-heading-padded"><div><h2>Customers with balance</h2><p>Follow up when it feels right.</p></div><button className="select-button"><CalendarDays size={14} /> This month <ChevronDown size={14} /></button></div><div className="table-scroll"><table><thead><tr><th>CUSTOMER</th><th>PHONE</th><th>LAST ACTIVITY</th><th>AMOUNT DUE</th><th /></tr></thead><tbody>{dueCustomers.map((customer) => <tr className="clickable-row" key={customer.id} onClick={() => window.location.assign(`/customers/${customer.id}`)}><td><div className="customer-cell"><span className={`customer-avatar avatar-${customer.color}`}>{customer.initials}</span><strong>{customer.name}</strong></div></td><td className="muted-cell">{customer.phone}</td><td className="muted-cell">{customer.lastActive}</td><td className="due-value">{money(customer.due)}</td><td><Link to={`/customers/${customer.id}`} className="text-link small-link">View <ArrowRight size={13} /></Link></td></tr>)}</tbody></table></div><div className="udhaar-note"><ShieldCheck size={16} /><span>Every rupee is tracked privately and securely on this device.</span></div></section></div>;
+
+  return <div>
+    <PageIntro
+      eyebrow="CUSTOMER CREDIT"
+      title="Udhaar book"
+      description="A clear picture of what’s owed, and who’s got your back."
+      action={<Button icon={MessageCircle} onClick={() => window.location.assign("/assistant")}>Ask your assistant</Button>}
+    />
+    <div className="udhaar-overview">
+      <div className="udhaar-total">
+        <span className="udhaar-total-icon"><Wallet size={24} /></span>
+        <span>
+          <small>Total outstanding</small>
+          <strong>{money(totalDue)}</strong>
+          <em>Across {dueCustomers.length} customers</em>
+        </span>
+        <div className="udhaar-trend"><TrendingDown size={16} /> Tracked</div>
+      </div>
+      <div className="udhaar-stat">
+        <span>Collected this month</span>
+        <strong>₹8,450</strong>
+        <small><span className="trend-positive">↑ 12%</span> vs last month</small>
+      </div>
+      <div className="udhaar-stat">
+        <span>Average credit</span>
+        <strong>{dueCustomers.length ? money(totalDue / dueCustomers.length) : "₹0"}</strong>
+        <small>Per customer</small>
+      </div>
+    </div>
+    <section className="panel table-panel">
+      <div className="panel-heading panel-heading-padded">
+        <div><h2>Customers with balance</h2><p>Follow up when it feels right.</p></div>
+        <button className="select-button"><CalendarDays size={16} /> This month <ChevronDown size={16} /></button>
+      </div>
+      <div className="table-scroll">
+        <table>
+          <thead>
+            <tr><th>CUSTOMER</th><th>PHONE</th><th>LAST ACTIVITY</th><th>AMOUNT DUE</th><th /></tr>
+          </thead>
+          <tbody>
+            {dueCustomers.map((customer) => (
+              <tr className="clickable-row" key={customer.id} onClick={() => window.location.assign(`/customers/${customer.id}`)}>
+                <td><div className="customer-cell"><span className={`customer-avatar avatar-${customer.color}`}>{customer.initials}</span><strong>{customer.name}</strong></div></td>
+                <td className="muted-cell">{customer.phone}</td>
+                <td className="muted-cell">{customer.lastActive}</td>
+                <td className="due-value">{money(customer.due)}</td>
+                <td><Link to={`/customers/${customer.id}`} className="text-link small-link">View <ArrowRight size={14} /></Link></td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <div className="udhaar-note">
+        <ShieldCheck size={18} /><span>Every rupee is tracked privately and securely on this device.</span>
+      </div>
+    </section>
+  </div>;
 }
 
 function Transactions() {
@@ -375,24 +975,338 @@ function Transactions() {
   const [filter, setFilter] = useState("All activity");
   const filters = ["All activity", "Sales", "Udhaar", "Payments"];
   const filtered = data.transactions.filter((transaction) => filter === "All activity" || filter === "Sales" && transaction.type === "sale" || filter === "Udhaar" && transaction.type === "credit" || filter === "Payments" && transaction.type === "payment");
-  return <div><PageIntro eyebrow="MONEY IN MOTION" title="Transactions" description="Every sale, payment and Udhaar — all in one place." action={<Button variant="secondary" icon={Download} onClick={() => window.print()}>Export</Button>} /><section className="panel table-panel"><div className="transaction-filters">{filters.map((item) => <button key={item} onClick={() => setFilter(item)} className={`filter-tab ${filter === item ? "selected" : ""}`}>{item}</button>)}</div><div className="table-scroll"><table><thead><tr><th>TRANSACTION</th><th>TYPE</th><th>DATE & TIME</th><th>AMOUNT</th></tr></thead><tbody>{filtered.map((item) => <tr key={item.id}><td><div className="product-cell"><span className={`transaction-icon transaction-${item.type}`}>{item.type === "payment" ? <ArrowDownLeft size={16} /> : item.type === "credit" ? <Clock3 size={16} /> : <ShoppingBag size={16} />}</span><span><strong>{item.title}</strong><small>{item.detail}</small></span></div></td><td><span className={`type-chip type-${item.type}`}>{item.type === "credit" ? "Udhaar" : item.type === "payment" ? "Payment" : "Sale"}</span></td><td className="muted-cell">{item.date}, {item.time}</td><td className={`strong-cell ${item.type === "payment" ? "amount-green" : ""}`}>{item.type === "credit" ? "+" : ""}{money(item.amount)}</td></tr>)}</tbody></table></div><div className="table-footer"><span>Showing <strong>{filtered.length}</strong> transactions</span></div></section></div>;
+
+  return <div>
+    <PageIntro eyebrow="MONEY IN MOTION" title="Transactions" description="Every sale, payment and Udhaar — all in one place." action={<Button variant="secondary" icon={Download} onClick={() => window.print()}>Export</Button>} />
+    <section className="panel table-panel">
+      <div className="transaction-filters">
+        {filters.map((item) => (
+          <button key={item} onClick={() => setFilter(item)} className={`filter-tab ${filter === item ? "selected" : ""}`}>
+            {item}
+          </button>
+        ))}
+      </div>
+      <div className="table-scroll">
+        <table>
+          <thead>
+            <tr><th>TRANSACTION</th><th>TYPE</th><th>DATE & TIME</th><th>AMOUNT</th></tr>
+          </thead>
+          <tbody>
+            {filtered.map((item) => (
+              <tr key={item.id}>
+                <td><div className="product-cell"><span className={`transaction-icon transaction-${item.type}`}>{item.type === "payment" ? <ArrowDownLeft size={18} /> : item.type === "credit" ? <Clock3 size={18} /> : <ShoppingBag size={18} />}</span><span><strong>{item.title}</strong><small>{item.detail}</small></span></div></td>
+                <td><span className={`type-chip type-${item.type}`}>{item.type === "credit" ? "Udhaar" : item.type === "payment" ? "Payment" : "Sale"}</span></td>
+                <td className="muted-cell">{item.date}, {item.time}</td>
+                <td className={`strong-cell ${item.type === "payment" ? "amount-green" : ""}`}>{item.type === "credit" ? "+" : ""}{money(item.amount)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <div className="table-footer"><span>Showing <strong>{filtered.length}</strong> transactions</span></div>
+    </section>
+  </div>;
 }
 
 function Reports() {
-  return <div><PageIntro eyebrow="A LITTLE PERSPECTIVE" title="Reports" description="Your business, at a glance. Better decisions start here." action={<button className="select-button"><CalendarDays size={14} /> Last 7 days <ChevronDown size={14} /></button>} /><div className="stat-grid report-stat-grid"><StatCard label="Total sales" value="₹28,640" note="vs. ₹24,180 last week" trend="+18.4%" icon={IndianRupee} tone="green" /><StatCard label="Items sold" value="342" note="Across 78 transactions" trend="+9.2%" icon={ShoppingBag} tone="blue" /><StatCard label="Udhaar collected" value="₹8,450" note="From 14 payments" trend="+12%" icon={Wallet} tone="amber" /><StatCard label="Top category" value="Grocery" note="42% of your sales" icon={TrendingUp} tone="rose" /></div><section className="panel report-panel"><div className="panel-heading"><div><h2>Sales performance</h2><p>A steady week is a good week.</p></div><span className="chart-legend"><i /> Sales</span></div><SalesChart /></section><div className="dashboard-bottom-grid report-bottom"><section className="panel"><div className="panel-heading"><div><h2>Top-selling products</h2><p>Your customers' favourites</p></div></div><div className="top-product-list">{[["Maggi 2-Minute Noodles", "84 packets sold", "₹1,176"], ["Amul Taaza Milk", "62 packets sold", "₹1,736"], ["Parle-G Biscuits", "48 packets sold", "₹480"], ["Tata Salt", "31 packets sold", "₹744"]].map((row, i) => <div className="top-product-row" key={row[0]}><span className="rank-number">0{i + 1}</span><span><strong>{row[0]}</strong><small>{row[1]}</small></span><b>{row[2]}</b></div>)}</div></section><section className="panel insight-panel"><div className="insight-icon"><Sparkles size={18} /></div><div className="eyebrow">A QUICK INSIGHT</div><h2>You're growing steadily.</h2><p>Your sales are up 18% this week. Milk and everyday grocery items are bringing most customers through the door.</p><Link to="/assistant" className="text-link">Ask your assistant <ArrowRight size={14} /></Link></section></div></div>;
+  return <div>
+    <PageIntro eyebrow="A LITTLE PERSPECTIVE" title="Reports" description="Your business, at a glance. Better decisions start here." action={<button className="select-button"><CalendarDays size={16} /> Last 7 days <ChevronDown size={16} /></button>} />
+    <div className="stat-grid report-stat-grid">
+      <StatCard label="Total sales" value="₹28,640" note="vs. ₹24,180 last week" trend="+18.4%" icon={IndianRupee} tone="green" />
+      <StatCard label="Items sold" value="342" note="Across 78 transactions" trend="+9.2%" icon={ShoppingBag} tone="blue" />
+      <StatCard label="Udhaar collected" value="₹8,450" note="From 14 payments" trend="+12%" icon={Wallet} tone="amber" />
+      <StatCard label="Top category" value="Grocery" note="42% of your sales" icon={TrendingUp} tone="rose" />
+    </div>
+    <section className="panel report-panel">
+      <div className="panel-heading">
+        <div><h2>Sales performance</h2><p>Steady revenue growth across everyday staples</p></div>
+        <span className="chart-legend"><i /> Sales</span>
+      </div>
+      <SalesChart />
+    </section>
+    <div className="dashboard-bottom-grid report-bottom">
+      <section className="panel">
+        <div className="panel-heading"><div><h2>Top-selling products</h2><p>Your customers' favourites</p></div></div>
+        <div className="top-product-list">
+          {[["Maggi 2-Minute Noodles", "84 packets sold", "₹1,176"], ["Amul Taaza Milk", "62 packets sold", "₹1,736"], ["Parle-G Biscuits", "48 packets sold", "₹480"], ["Tata Salt", "31 packets sold", "₹744"]].map((row, i) => (
+            <div className="top-product-row" key={row[0]}>
+              <span className="rank-number">0{i + 1}</span>
+              <span><strong>{row[0]}</strong><small>{row[1]}</small></span>
+              <b>{row[2]}</b>
+            </div>
+          ))}
+        </div>
+      </section>
+      <section className="panel insight-panel">
+        <div className="insight-icon"><Sparkles size={20} /></div>
+        <div className="eyebrow">A QUICK INSIGHT</div>
+        <h2>You're growing steadily.</h2>
+        <p>Your sales are up 18% this week. Milk and everyday grocery items are bringing most customers through the door.</p>
+        <Link to="/assistant" className="text-link">Ask your assistant <ArrowRight size={16} /></Link>
+      </section>
+    </div>
+  </div>;
 }
 
 function LowStock() {
   const { data } = useStore();
+  const [showReorderModal, setShowReorderModal] = useState(false);
   const lowProducts = data.products.filter((product) => product.stock <= product.minStock);
-  return <div><PageIntro eyebrow="A FRIENDLY HEADS-UP" title="Stock to watch" description="A few products are running low. Let’s get ahead of the next busy day." action={<Button icon={MessageCircle} onClick={() => window.location.assign("/assistant")}>Ask to restock</Button>} /><div className="alert-banner"><span className="alert-banner-icon"><AlertTriangle size={17} /></span><span><strong>{lowProducts.length} products need a little attention</strong><small>Stock up before they run out. Your customers will thank you.</small></span></div><section className="panel table-panel"><div className="panel-heading panel-heading-padded"><div><h2>Running low</h2><p>Based on your minimum stock levels.</p></div><span className="low-count">{lowProducts.length} items</span></div><div className="low-stock-list">{lowProducts.map((product) => <div className="low-stock-row" key={product.id}><ProductThumb product={product} /><div className="low-product-name"><strong>{product.name}</strong><small>{product.category} · {money(product.price)} per {product.unit}</small></div><div className="low-stock-progress"><div className="progress-label"><span>Current stock</span><strong>{product.stock} <small>/ {product.minStock} {product.unit}s</small></strong></div><div className="progress-track"><span style={{ width: `${Math.min(product.stock / product.minStock * 100, 100)}%` }} /></div></div><span className="restock-chip">{product.stock === 0 ? "Out of stock" : "Low"}</span><Link className="icon-button subtle-icon" to={`/inventory/${product.id}`} aria-label={`View ${product.name}`}><ArrowRight size={16} /></Link></div>)}</div><div className="reorder-hint"><Sparkles size={16} /><span><strong>Quick tip</strong> — say “Received 20 milk packets” to update stock in seconds.</span><Link to="/assistant" className="text-link">Try it <ArrowRight size={14} /></Link></div></section></div>;
+
+  return <div>
+    <PageIntro
+      eyebrow="A FRIENDLY HEADS-UP"
+      title="Stock to watch"
+      description="A few products are running low. Let’s get ahead of the next busy day."
+      action={
+        <button
+          type="button"
+          className="button whatsapp-button"
+          onClick={() => setShowReorderModal(true)}
+        >
+          <MessageCircle size={18} /> WhatsApp Supplier Reorder
+        </button>
+      }
+    />
+    <div className="alert-banner">
+      <span className="alert-banner-icon"><AlertTriangle size={20} /></span>
+      <span>
+        <strong>{lowProducts.length} products need a little attention</strong>
+        <small>Stock up before they run out. Send an official reorder via WhatsApp Cloud API.</small>
+      </span>
+    </div>
+    <section className="panel table-panel">
+      <div className="panel-heading panel-heading-padded">
+        <div><h2>Running low</h2><p>Based on your minimum stock levels.</p></div>
+        <span className="low-count">{lowProducts.length} items</span>
+      </div>
+      <div className="low-stock-list">
+        {lowProducts.map((product) => (
+          <div className="low-stock-row" key={product.id}>
+            <ProductThumb product={product} />
+            <div className="low-product-name">
+              <strong>{product.name}</strong>
+              <small>{product.category} · {money(product.price)} per {product.unit}</small>
+            </div>
+            <div className="low-stock-progress">
+              <div className="progress-label">
+                <span>Current stock</span>
+                <strong>{product.stock} <small>/ {product.minStock} {product.unit}s</small></strong>
+              </div>
+              <div className="progress-track">
+                <span style={{ width: `${Math.min((product.stock / product.minStock) * 100, 100)}%` }} />
+              </div>
+            </div>
+            <span className="restock-chip">{product.stock === 0 ? "Out of stock" : "Low"}</span>
+            <Link className="icon-button subtle-icon" to={`/inventory/${product.id}`} aria-label={`View ${product.name}`}>
+              <ArrowRight size={18} />
+            </Link>
+          </div>
+        ))}
+      </div>
+      <div className="reorder-hint">
+        <Sparkles size={18} />
+        <span><strong>Quick tip</strong> — tell your Assistant “Received 20 milk packets” or “Reorder rice” anytime.</span>
+        <Link to="/assistant" className="text-link">Try it <ArrowRight size={16} /></Link>
+      </div>
+    </section>
+
+    {showReorderModal && (
+      <WhatsAppReorderModal
+        supplier={{ name: "General Wholesale Distributors", phone: "+91 98765 43210" }}
+        onClose={() => setShowReorderModal(false)}
+      />
+    )}
+  </div>;
 }
 
 function SettingsPage() {
   const { data, setData } = useStore();
   const [saved, setSaved] = useState(false);
-  const submit = (event) => { event.preventDefault(); const form = new FormData(event.currentTarget); setData((current) => ({ ...current, shop: { ...current.shop, name: form.get("shop"), owner: form.get("owner"), phone: form.get("phone"), city: form.get("city"), address: form.get("address") } })); setSaved(true); setTimeout(() => setSaved(false), 2400); };
-  return <div><PageIntro eyebrow="YOUR SPACE" title="Settings" description="Make Kirana Ledger feel a little more like your shop." /><div className="settings-layout"><aside className="settings-menu"><a className="settings-menu-item selected"><ShoppingBag size={16} /> Shop profile</a><a className="settings-menu-item"><UserRound size={16} /> Your account</a><a className="settings-menu-item"><Bell size={16} /> Notifications</a><a className="settings-menu-item"><ShieldCheck size={16} /> Privacy & security</a></aside><form className="panel settings-form" onSubmit={submit}><div className="panel-heading"><div><h2>Shop profile</h2><p>These details help personalise your experience.</p></div></div><label className="form-field">Shop name<input name="shop" defaultValue={data.shop.name} required /></label><label className="form-field">Owner name<input name="owner" defaultValue={data.shop.owner} required /></label><label className="form-field">Mobile number<input name="phone" defaultValue={data.shop.phone} /></label><label className="form-field">City<input name="city" defaultValue={data.shop.city} /></label><label className="form-field">Shop address<input name="address" defaultValue={data.shop.address} /></label><div className="settings-footer"><span className="saved-note">{saved && <><Check size={15} /> Changes saved</>}</span><Button type="submit">Save changes</Button></div></form></div></div>;
+  const [activeTab, setActiveTab] = useState("profile");
+  const navigate = useNavigate();
+
+  const handleLogout = () => {
+    sessionStorage.removeItem("kirana-ledger-demo-session");
+    navigate("/login");
+  };
+
+  const submit = (event) => {
+    event.preventDefault();
+    const form = new FormData(event.currentTarget);
+    setData((current) => ({
+      ...current,
+      shop: {
+        ...current.shop,
+        name: form.get("shop"),
+        owner: form.get("owner"),
+        phone: form.get("phone"),
+        city: form.get("city"),
+        address: form.get("address")
+      }
+    }));
+    setSaved(true);
+    setTimeout(() => setSaved(false), 2400);
+  };
+
+  return <div>
+    <PageIntro
+      eyebrow="YOUR SPACE"
+      title="Settings"
+      description="Make Kirana Ledger feel a little more like your shop."
+      action={
+        <Button variant="secondary" icon={LogOut} onClick={handleLogout} className="settings-header-logout">
+          Log out
+        </Button>
+      }
+    />
+    <div className="settings-layout">
+      <aside className="settings-menu">
+        <button
+          type="button"
+          className={`settings-menu-item ${activeTab === "profile" ? "selected" : ""}`}
+          onClick={() => setActiveTab("profile")}
+        >
+          <ShoppingBag size={18} /> Shop profile
+        </button>
+        <button
+          type="button"
+          className={`settings-menu-item ${activeTab === "account" ? "selected" : ""}`}
+          onClick={() => setActiveTab("account")}
+        >
+          <UserRound size={18} /> Your account
+        </button>
+        <button
+          type="button"
+          className={`settings-menu-item ${activeTab === "notifications" ? "selected" : ""}`}
+          onClick={() => setActiveTab("notifications")}
+        >
+          <Bell size={18} /> Notifications
+        </button>
+        <button
+          type="button"
+          className={`settings-menu-item ${activeTab === "privacy" ? "selected" : ""}`}
+          onClick={() => setActiveTab("privacy")}
+        >
+          <ShieldCheck size={18} /> Privacy & security
+        </button>
+        <div className="settings-menu-divider" />
+        <button
+          type="button"
+          className="settings-menu-item settings-logout-item"
+          onClick={handleLogout}
+        >
+          <LogOut size={18} /> Log out
+        </button>
+      </aside>
+
+      {activeTab === "profile" && (
+        <form className="panel settings-form" onSubmit={submit}>
+          <div className="panel-heading">
+            <div>
+              <h2>Shop profile</h2>
+              <p>These details personalise your experience and WhatsApp messages.</p>
+            </div>
+          </div>
+          <label className="form-field">Shop name<input name="shop" defaultValue={data.shop.name} required /></label>
+          <label className="form-field">Owner name<input name="owner" defaultValue={data.shop.owner} required /></label>
+          <label className="form-field">Mobile number<input name="phone" defaultValue={data.shop.phone} /></label>
+          <label className="form-field">City<input name="city" defaultValue={data.shop.city} /></label>
+          <label className="form-field">Shop address<input name="address" defaultValue={data.shop.address} /></label>
+          <div className="settings-footer">
+            <span className="saved-note">{saved && <><Check size={16} /> Changes saved</>}</span>
+            <Button type="submit">Save changes</Button>
+          </div>
+        </form>
+      )}
+
+      {activeTab === "account" && (
+        <div className="panel settings-form">
+          <div className="panel-heading">
+            <div>
+              <h2>Your account</h2>
+              <p>Manage your account credentials and active store session.</p>
+            </div>
+          </div>
+          <div className="account-info-grid">
+            <div className="account-info-box">
+              <span>Account Owner</span>
+              <strong>{data.shop.owner || "Ramesh Sharma"}</strong>
+            </div>
+            <div className="account-info-box">
+              <span>Primary Phone</span>
+              <strong>{data.shop.phone || "+91 98765 43210"}</strong>
+            </div>
+            <div className="account-info-box">
+              <span>Store Name</span>
+              <strong>{data.shop.name || "Sharma General Store"}</strong>
+            </div>
+            <div className="account-info-box">
+              <span>Subscription</span>
+              <strong>Kirana Pro (Byte Race 2026)</strong>
+            </div>
+          </div>
+          <div className="danger-zone">
+            <h3>Active Session</h3>
+            <p>You are currently logged in to your Kirana Ledger shop dashboard. Logging out will clear your session on this browser.</p>
+            <Button variant="secondary" icon={LogOut} onClick={handleLogout} className="logout-danger-btn">
+              Log out of Kirana Ledger
+            </Button>
+          </div>
+        </div>
+      )}
+
+      {activeTab === "notifications" && (
+        <div className="panel settings-form">
+          <div className="panel-heading">
+            <div>
+              <h2>Notifications</h2>
+              <p>Configure automated shop alerts and WhatsApp order notifications.</p>
+            </div>
+          </div>
+          <div className="account-info-grid">
+            <div className="account-info-box">
+              <span>WhatsApp Supplier Reorder</span>
+              <strong>Enabled (v18.0 Cloud API)</strong>
+            </div>
+            <div className="account-info-box">
+              <span>Low-Stock Alerts</span>
+              <strong>Active for all products</strong>
+            </div>
+            <div className="account-info-box">
+              <span>Daily Closing Reconciliation</span>
+              <strong>Automatic 9:00 PM</strong>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {activeTab === "privacy" && (
+        <div className="panel settings-form">
+          <div className="panel-heading">
+            <div>
+              <h2>Privacy & Security</h2>
+              <p>Your shop inventory and Udhaar ledger are stored safely.</p>
+            </div>
+          </div>
+          <div className="account-info-grid">
+            <div className="account-info-box">
+              <span>Database Storage</span>
+              <strong>SQLite File Persistence</strong>
+            </div>
+            <div className="account-info-box">
+              <span>API Communication</span>
+              <strong>Local Host & Encrypted Webhooks</strong>
+            </div>
+            <div className="account-info-box">
+              <span>Session Security</span>
+              <strong>SessionStorage Demo Guard</strong>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  </div>;
 }
 
 function Assistant() {
@@ -409,7 +1323,7 @@ function Assistant() {
     const text = raw.trim();
     if (!text) return;
 
-    const userMessage = { id: `m${Date.now()}`, role: "user", text };
+    const userMessage = { id: `m${Date.now()}`, role: "user", text, time: "Just now" };
     setData((current) => ({ ...current, messages: [...current.messages, userMessage] }));
     setInput("");
     setBusy(true);
@@ -418,13 +1332,21 @@ function Assistant() {
       const res = await fetch(`${API_BASE}/chat`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ message: text }),
+        body: JSON.stringify({ message: text, session_id: "kirana-session-1" }),
       });
 
       if (res.ok) {
         const payload = await res.json();
         const replyText = payload.reply || "Done.";
-        const assistantMessage = { id: `m${Date.now()}-reply`, role: "assistant", text: replyText };
+        const isPending = payload.intent === "confirmation_pending";
+        const assistantMessage = {
+          id: `m${Date.now()}-reply`,
+          role: "assistant",
+          text: replyText,
+          time: "Just now",
+          isPending,
+          pendingAction: payload.pending_action,
+        };
         setData((current) => ({ ...current, messages: [...current.messages, assistantMessage] }));
 
         if (payload.success) {
@@ -453,7 +1375,7 @@ function Assistant() {
       } else {
         const errPayload = await res.json().catch(() => ({}));
         const replyText = errPayload.detail || "Sorry, I could not process that request.";
-        const assistantMessage = { id: `m${Date.now()}-reply`, role: "assistant", text: replyText };
+        const assistantMessage = { id: `m${Date.now()}-reply`, role: "assistant", text: replyText, time: "Just now" };
         setData((current) => ({ ...current, messages: [...current.messages, assistantMessage] }));
       }
     } catch (error) {
@@ -462,6 +1384,7 @@ function Assistant() {
         id: `m${Date.now()}-reply`,
         role: "assistant",
         text: "Could not connect to Kirana Ledger backend API. Please make sure the backend is running at http://127.0.0.1:8000.",
+        time: "Just now",
       };
       setData((current) => ({ ...current, messages: [...current.messages, assistantMessage] }));
     } finally {
@@ -469,7 +1392,138 @@ function Assistant() {
     }
   };
 
-  return <div className="assistant-page"><div className="assistant-heading"><div><div className="eyebrow">YOUR SHOP ASSISTANT</div><h1>What can I help with?</h1><p>A simple message is all it takes to keep your shop in good shape.</p></div><span className="assistant-online"><i /> Here for you</span></div><div className="assistant-workspace"><aside className="assistant-side"><div className="assistant-side-title"><Sparkles size={17} /> Try asking</div><p>Say it just like you’d say it to a friend.</p>{["Sold 5 Maggi", "Received 20 milk packets", "Ramesh paid ₹500", "Which products are low?", "Show today's sales"].map((suggestion) => <button className="suggestion-button" key={suggestion} onClick={() => processMessage(suggestion)}><MessageCircle size={15} />{suggestion}<ArrowRight size={14} /></button>)}<div className="assistant-privacy"><ShieldCheck size={15} /><span>Your shop data stays private on this device.</span></div></aside><section className="assistant-chat"><div className="chat-topline"><span className="assistant-bot-avatar"><Sparkles size={17} /></span><span><strong>Kirana Assistant</strong><small><i /> Online · ready when you are</small></span><button className="icon-button chat-menu" aria-label="More"><Ellipsis size={19} /></button></div><div className="chat-messages">{data.messages.length === 0 && <div className="chat-welcome"><div className="assistant-welcome-icon"><MessageCircle size={23} /></div><span className="eyebrow">YOUR EVERYDAY SHOP PARTNER</span><h2>Namaste, Ramesh!</h2><p>Your shop is in good hands. Ask me about your stock, record a sale, or just check in on your business.</p><div className="welcome-prompts">{["How much Maggi do I have?", "Who owes me money?"].map((prompt) => <button key={prompt} onClick={() => processMessage(prompt)}>{prompt}<ArrowRight size={14} /></button>)}</div></div>}{data.messages.map((message) => <div className={`chat-message message-${message.role}`} key={message.id}>{message.role === "assistant" && <span className="message-avatar"><Sparkles size={13} /></span>}<div className="message-bubble">{message.text}<small>{message.role === "user" ? "You · just now" : "Kirana Assistant · just now"}</small></div>{message.role === "user" && <span className="message-user-avatar">RS</span>}</div>)}{busy && <div className="chat-message message-assistant"><span className="message-avatar"><Sparkles size={13} /></span><div className="typing-indicator"><i /><i /><i /></div></div>}<div ref={bottomRef} /></div><form className="chat-composer" onSubmit={(event) => { event.preventDefault(); processMessage(input); }}><input value={input} onChange={(event) => setInput(event.target.value)} placeholder="Tell me what happened at your shop..." /><button className="composer-mic" type="button" aria-label="Voice input"><Mic size={18} /></button><button className="send-button" type="submit" disabled={!input.trim() || busy} aria-label="Send message"><Send size={17} /></button><span className="composer-note">Press enter to send</span></form></section></div></div>;
+  const handleClearChat = () => {
+    setData((current) => ({ ...current, messages: [] }));
+  };
+
+  const suggestions = [
+    "How much Rice do I have?",
+    "What items are low on stock?",
+    "What were today's sales?",
+    "How much does Ramesh owe?",
+    "Who owes money?",
+    "Reorder rice",
+    "Sold 5 Maggi",
+    "Ramesh paid ₹200",
+  ];
+
+  return <div className="assistant-page">
+    <div className="assistant-heading">
+      <div>
+        <div className="eyebrow">CONVERSATIONAL SHOP ASSISTANT</div>
+        <h1>Talk to your shop</h1>
+        <p>Natural language voice and chat ledger for inventory, sales, Udhaar, and supplier reordering.</p>
+      </div>
+      <div style={{ display: "flex", gap: "10px", alignItems: "center" }}>
+        <button className="clear-chat-button" onClick={handleClearChat}>
+          <RefreshCw size={14} style={{ verticalAlign: "-2px", marginRight: "4px" }} /> Clear Chat
+        </button>
+        <span className="assistant-online"><i /> Online & Ready</span>
+      </div>
+    </div>
+
+    <div className="assistant-workspace">
+      <aside className="assistant-side">
+        <div className="assistant-side-title"><Sparkles size={18} /> Quick Queries</div>
+        <p>Ask questions or record transactions naturally.</p>
+        {suggestions.map((suggestion) => (
+          <button className="suggestion-button" key={suggestion} onClick={() => processMessage(suggestion)}>
+            <MessageCircle size={16} />
+            <span>{suggestion}</span>
+            <ArrowRight size={14} />
+          </button>
+        ))}
+        <div className="assistant-privacy">
+          <ShieldCheck size={18} />
+          <span>Local session context active. Inferred actions prompt for confirmation before mutating ledger.</span>
+        </div>
+      </aside>
+
+      <section className="assistant-chat">
+        <div className="chat-topline">
+          <span className="assistant-bot-avatar"><Sparkles size={18} /></span>
+          <span>
+            <strong>Kirana Assistant</strong>
+            <small><i /> Natural Language & AI Chatbot</small>
+          </span>
+        </div>
+
+        <div className="chat-messages">
+          {data.messages.length === 0 && (
+            <div className="chat-welcome">
+              <div className="assistant-welcome-icon"><MessageCircle size={26} /></div>
+              <span className="eyebrow">YOUR DIGITAL SHOP PARTNER</span>
+              <h2>Namaste, Ramesh!</h2>
+              <p>Ask about stock levels, inspect customer Udhaar, record sales, or draft supplier WhatsApp orders.</p>
+              <div className="welcome-prompts">
+                {["How much Rice do I have?", "What were today's sales?", "How much does Ramesh owe?", "What items are low on stock?"].map((prompt) => (
+                  <button key={prompt} onClick={() => processMessage(prompt)}>
+                    {prompt} <ArrowRight size={14} />
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {data.messages.map((message) => (
+            <div className={`chat-message message-${message.role}`} key={message.id}>
+              {message.role === "assistant" && <span className="message-avatar"><Sparkles size={16} /></span>}
+              <div className="message-bubble">
+                {message.text}
+                {message.isPending && (
+                  <div className="confirm-action-buttons">
+                    <button className="confirm-btn-yes" onClick={() => processMessage("yes")}>
+                      ✓ Yes, Confirm
+                    </button>
+                    <button className="confirm-btn-no" onClick={() => processMessage("no")}>
+                      ✕ No, Cancel
+                    </button>
+                  </div>
+                )}
+                <small>{message.role === "user" ? "You · " + (message.time || "just now") : "Kirana Assistant · " + (message.time || "just now")}</small>
+              </div>
+              {message.role === "user" && <span className="message-user-avatar">RS</span>}
+            </div>
+          ))}
+
+          {busy && (
+            <div className="chat-message message-assistant">
+              <span className="message-avatar"><Sparkles size={16} /></span>
+              <div className="typing-indicator"><i /><i /><i /></div>
+            </div>
+          )}
+          <div ref={bottomRef} />
+        </div>
+
+        <form
+          className="chat-composer"
+          onSubmit={(event) => {
+            event.preventDefault();
+            processMessage(input);
+          }}
+        >
+          <input
+            value={input}
+            onChange={(event) => setInput(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === "Enter" && !event.shiftKey) {
+                event.preventDefault();
+                processMessage(input);
+              }
+            }}
+            placeholder="Type a command (e.g. 'How much rice left?', 'Sell 5', 'Ramesh paid 200')..."
+          />
+          <button className="composer-mic" type="button" aria-label="Voice input" onClick={() => setInput("Sold 3 Maggi and 2 milk")}>
+            <Mic size={20} />
+          </button>
+          <button className="send-button" type="submit" disabled={!input.trim() || busy} aria-label="Send message">
+            <Send size={18} />
+          </button>
+          <span className="composer-note">Press Enter to send (Shift+Enter for newline)</span>
+        </form>
+      </section>
+    </div>
+  </div>;
 }
 
 function Login() {
@@ -483,6 +1537,7 @@ function Login() {
   const [resetOpen, setResetOpen] = useState(false);
   const [resetNotice, setResetNotice] = useState("");
   const validContact = (value) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value) || /^\+?[\d\s()-]{10,15}$/.test(value);
+
   const submit = (event) => {
     event.preventDefault();
     const form = new FormData(event.currentTarget);
@@ -496,18 +1551,148 @@ function Login() {
     setErrors(nextErrors);
     if (Object.keys(nextErrors).length) return;
     setLoading(true);
-    window.setTimeout(() => { sessionStorage.setItem("kirana-ledger-demo-session", "1"); navigate("/dashboard"); }, 350);
+    window.setTimeout(() => {
+      sessionStorage.setItem("kirana-ledger-demo-session", "1");
+      navigate("/dashboard");
+    }, 350);
   };
+
   const verifyOtp = (event) => {
     event.preventDefault();
-    if (otp !== "123456") { setOtpError("That code didn’t match. For this demo, use 123456."); return; }
+    if (otp !== "123456") {
+      setOtpError("That code didn’t match. For this demo, use 123456.");
+      return;
+    }
     sessionStorage.setItem("kirana-ledger-demo-session", "1");
     navigate("/dashboard");
   };
-  const requestReset = (event) => { event.preventDefault(); setResetNotice("Demo only — password reset will be connected to the backend later."); };
-  return <div className="auth-page"><div className="auth-brand-panel"><Brand /><div className="auth-story"><span className="eyebrow">MADE FOR YOUR SHOP</span><h1>Run your shop<br />by simply <span>talking to it.</span></h1><p>Track inventory, monitor low-stock products, understand daily activity and manage supplier reorders from one simple dashboard.</p><div className="auth-feature-list"><span><Check size={14} /> Simple inventory management</span><span><Check size={14} /> Smart low-stock alerts</span><span><Check size={14} /> Daily shop activity</span><span><Check size={14} /> Faster supplier reordering</span></div><div className="auth-story-note"><span className="auth-note-icon"><MessageCircle size={17} /></span><span>“Sold 5 Maggi”<small>That's all it takes.</small></span></div></div><div className="auth-footer">Trusted by local shops, built for the way you work.</div></div><div className="auth-form-panel"><div className="auth-mobile-brand"><Brand /></div><form className="auth-card" onSubmit={submit} noValidate><div className="auth-heading"><div className="eyebrow">WELCOME BACK</div><h2>Welcome back</h2><p>Sign in to your shop dashboard.</p></div><label className="form-field" htmlFor="login-contact">Mobile / Email<input id="login-contact" name="email" type="text" autoComplete="username" aria-invalid={Boolean(errors.email)} aria-describedby={errors.email ? "login-contact-error" : undefined} placeholder="Enter your mobile number or email" onChange={() => setErrors((current) => ({ ...current, email: undefined }))} />{errors.email && <span className="field-error" id="login-contact-error" role="alert">{errors.email}</span>}</label><label className="form-field" htmlFor="login-password">Password<div className="password-input"><input id="login-password" name="password" type={passwordVisible ? "text" : "password"} autoComplete="current-password" aria-invalid={Boolean(errors.password)} aria-describedby={errors.password ? "login-password-error" : undefined} placeholder="Enter your password" onChange={() => setErrors((current) => ({ ...current, password: undefined }))} /><button type="button" className="password-toggle" aria-label={passwordVisible ? "Hide password" : "Show password"} onClick={() => setPasswordVisible((current) => !current)}>{passwordVisible ? <EyeOff size={16} /> : <Eye size={16} />}</button></div>{errors.password && <span className="field-error" id="login-password-error" role="alert">{errors.password}</span>}<button type="button" className="forgot-link" onClick={() => { setResetNotice(""); setResetOpen(true); }}>Forgot password?</button></label><Button type="submit" className="auth-submit">{loading ? "Signing in..." : "Sign In"}{!loading && <ArrowRight size={16} />}</Button><div className="auth-divider"><span />or<span /></div><Button variant="secondary" className="otp-button" icon={MessageCircle} onClick={() => { setOtp(""); setOtpError(""); setOtpOpen(true); }}>Continue with OTP</Button><div className="auth-signup">Don't have an account? <Link to="/onboarding">Create one</Link></div><div className="demo-caption">Frontend demo · Any valid-looking mobile/email and password (6+ characters)</div></form><span className="auth-legal">By continuing, you agree to our Terms of Service and Privacy Policy.</span></div>
-    {otpOpen && <Modal title="Verify your number" onClose={() => setOtpOpen(false)}><form className="form-grid" onSubmit={verifyOtp}><p className="full-field modal-copy">We’ve sent a verification code to your mobile number. <span className="demo-caption">Demo code: 123456</span></p><label className="form-field full-field" htmlFor="demo-otp">Verification code<input id="demo-otp" inputMode="numeric" autoComplete="one-time-code" maxLength={6} value={otp} onChange={(event) => { setOtp(event.target.value.replace(/\D/g, "")); setOtpError(""); }} placeholder="_ _ _ _ _ _" aria-invalid={Boolean(otpError)} aria-describedby={otpError ? "otp-error" : undefined} required />{otpError && <span className="field-error" id="otp-error" role="alert">{otpError}</span>}</label><div className="form-actions full-field"><Button variant="secondary" onClick={() => setOtpOpen(false)}>Cancel</Button><Button type="submit">Verify</Button></div></form></Modal>}
-    {resetOpen && <Modal title="Reset your password" onClose={() => setResetOpen(false)}><form className="form-grid" onSubmit={requestReset}><label className="form-field full-field" htmlFor="reset-contact">Mobile / Email<input id="reset-contact" required placeholder="Enter your mobile number or email" /></label>{resetNotice && <p className="full-field reset-notice" role="status">{resetNotice}</p>}<div className="form-actions full-field"><Button variant="secondary" onClick={() => setResetOpen(false)}>Cancel</Button><Button type="submit">Send Reset Link</Button></div></form></Modal>}
+
+  const requestReset = (event) => {
+    event.preventDefault();
+    setResetNotice("Demo only — password reset will be connected to the backend later.");
+  };
+
+  return <div className="auth-page">
+    <div className="auth-brand-panel">
+      <Brand />
+      <div className="auth-story">
+        <span className="eyebrow">MADE FOR YOUR SHOP</span>
+        <h1>Run your shop<br />by simply <span>talking to it.</span></h1>
+        <p>Track inventory, monitor low-stock products, inspect daily activity, and dispatch WhatsApp supplier orders from one simple assistant.</p>
+        <div className="auth-feature-list">
+          <span><Check size={16} /> Simple natural language inventory management</span>
+          <span><Check size={16} /> Smart low-stock alerts & WhatsApp reorders</span>
+          <span><Check size={16} /> End-of-day sales & Udhaar reconciliation</span>
+          <span><Check size={16} /> Meta WhatsApp Business Cloud API integration</span>
+        </div>
+        <div className="auth-story-note">
+          <span className="auth-note-icon"><MessageCircle size={18} /></span>
+          <span>“Sold 5 Maggi”<small>That's all it takes.</small></span>
+        </div>
+      </div>
+      <div className="auth-footer">Trusted by local shops, built for the way you work.</div>
+    </div>
+    <div className="auth-form-panel">
+      <div className="auth-mobile-brand"><Brand /></div>
+      <form className="auth-card" onSubmit={submit} noValidate>
+        <div className="auth-heading">
+          <div className="eyebrow">WELCOME BACK</div>
+          <h2>Welcome back</h2>
+          <p>Sign in to your shop dashboard.</p>
+        </div>
+        <div className="form-field">
+          <label htmlFor="login-contact">Mobile / Email</label>
+          <input
+            id="login-contact"
+            name="email"
+            type="text"
+            autoComplete="username"
+            aria-invalid={Boolean(errors.email)}
+            aria-describedby={errors.email ? "login-contact-error" : undefined}
+            placeholder="Enter your mobile number or email"
+            onChange={() => setErrors((current) => ({ ...current, email: undefined }))}
+          />
+          {errors.email && <span className="field-error" id="login-contact-error" role="alert">{errors.email}</span>}
+        </div>
+        <div className="form-field">
+          <div className="form-label-row">
+            <label htmlFor="login-password">Password</label>
+            <button type="button" className="forgot-link" onClick={() => { setResetNotice(""); setResetOpen(true); }}>Forgot password?</button>
+          </div>
+          <div className="password-input">
+            <input
+              id="login-password"
+              name="password"
+              type={passwordVisible ? "text" : "password"}
+              autoComplete="current-password"
+              aria-invalid={Boolean(errors.password)}
+              aria-describedby={errors.password ? "login-password-error" : undefined}
+              placeholder="Enter your password"
+              onChange={() => setErrors((current) => ({ ...current, password: undefined }))}
+            />
+            <button
+              type="button"
+              className="password-toggle"
+              aria-label={passwordVisible ? "Hide password" : "Show password"}
+              onClick={() => setPasswordVisible((current) => !current)}
+            >
+              {passwordVisible ? <EyeOff size={18} /> : <Eye size={18} />}
+            </button>
+          </div>
+          {errors.password && <span className="field-error" id="login-password-error" role="alert">{errors.password}</span>}
+        </div>
+        <Button type="submit" className="auth-submit">
+          {loading ? "Signing in..." : "Sign In"}{!loading && <ArrowRight size={18} />}
+        </Button>
+        <div className="auth-divider"><span />or<span /></div>
+        <Button variant="secondary" className="otp-button" icon={MessageCircle} onClick={() => { setOtp(""); setOtpError(""); setOtpOpen(true); }}>Continue with OTP</Button>
+        <div className="auth-signup">Don't have an account? <Link to="/onboarding">Create one</Link></div>
+        <div className="demo-caption">Demo mode · Any valid contact & password (6+ chars)</div>
+      </form>
+      <span className="auth-legal">By continuing, you agree to our Terms of Service and Privacy Policy.</span>
+    </div>
+    {otpOpen && (
+      <Modal title="Verify your number" onClose={() => setOtpOpen(false)}>
+        <form className="form-grid" onSubmit={verifyOtp}>
+          <p className="full-field modal-copy">We’ve sent a verification code to your mobile number. <span className="demo-caption">Demo code: 123456</span></p>
+          <label className="form-field full-field" htmlFor="demo-otp">
+            Verification code
+            <input
+              id="demo-otp"
+              inputMode="numeric"
+              autoComplete="one-time-code"
+              maxLength={6}
+              value={otp}
+              onChange={(event) => { setOtp(event.target.value.replace(/\D/g, "")); setOtpError(""); }}
+              placeholder="_ _ _ _ _ _"
+              aria-invalid={Boolean(otpError)}
+              aria-describedby={otpError ? "otp-error" : undefined}
+              required
+            />
+            {otpError && <span className="field-error" id="otp-error" role="alert">{otpError}</span>}
+          </label>
+          <div className="form-actions full-field">
+            <Button variant="secondary" onClick={() => setOtpOpen(false)}>Cancel</Button>
+            <Button type="submit">Verify</Button>
+          </div>
+        </form>
+      </Modal>
+    )}
+    {resetOpen && (
+      <Modal title="Reset your password" onClose={() => setResetOpen(false)}>
+        <form className="form-grid" onSubmit={requestReset}>
+          <label className="form-field full-field" htmlFor="reset-contact">
+            Mobile / Email
+            <input id="reset-contact" required placeholder="Enter your mobile number or email" />
+          </label>
+          {resetNotice && <p className="full-field reset-notice" role="status">{resetNotice}</p>}
+          <div className="form-actions full-field">
+            <Button variant="secondary" onClick={() => setResetOpen(false)}>Cancel</Button>
+            <Button type="submit">Send Reset Link</Button>
+          </div>
+        </form>
+      </Modal>
+    )}
   </div>;
 }
 
@@ -516,20 +1701,138 @@ function Onboarding() {
   const [step, setStep] = useState(1);
   const [products, setProducts] = useState([{ name: "", category: "Grocery", price: "", stock: "", minStock: "10", unit: "packet" }]);
   const navigate = useNavigate();
-  const saveShop = (event) => { event.preventDefault(); const form = new FormData(event.currentTarget); setData((current) => ({ ...current, shop: { name: form.get("shop"), owner: form.get("owner"), phone: form.get("phone"), city: form.get("city"), address: form.get("address") } })); setStep(2); };
-  const finish = () => { const added = products.filter((p) => p.name.trim()).map((p, index) => ({ ...p, id: `onboard-${Date.now()}-${index}`, price: Number(p.price || 0), stock: Number(p.stock || 0), minStock: Number(p.minStock || 10), sku: `NEW-${index + 1}` })); setData((current) => ({ ...current, products: added.length ? [...added, ...current.products] : current.products, onboardingComplete: true })); setStep(3); };
-  return <div className="onboarding-page"><div className="onboarding-top"><Brand /><Link to="/login" className="skip-link">Already have an account? <strong>Sign in</strong></Link></div><div className="onboarding-content"><div className="onboarding-progress"><span className={`progress-step ${step >= 1 ? "active" : ""}`}><i>{step > 1 ? <Check size={14} /> : "1"}</i><span>Your shop</span></span><span className="progress-line" /><span className={`progress-step ${step >= 2 ? "active" : ""}`}><i>{step > 2 ? <Check size={14} /> : "2"}</i><span>First products</span></span><span className="progress-line" /><span className={`progress-step ${step >= 3 ? "active" : ""}`}><i>3</i><span>All set</span></span></div>
-    {step === 1 && <form className="onboarding-card" onSubmit={saveShop}><span className="onboarding-icon"><ShoppingBag size={20} /></span><span className="eyebrow">LET'S GET YOU SET UP · STEP 1 OF 3</span><h1>Tell us about your shop</h1><p>A few details make your experience feel right at home.</p><div className="form-grid"><label className="form-field full-field">Shop name<input name="shop" required defaultValue={data.shop.name} placeholder="e.g. Sharma General Store" /></label><label className="form-field">Your name<input name="owner" required defaultValue={data.shop.owner} placeholder="Full name" /></label><label className="form-field">Mobile number<input name="phone" type="tel" required defaultValue={data.shop.phone} placeholder="+91 98765 43210" /></label><label className="form-field">City<input name="city" required defaultValue={data.shop.city} placeholder="e.g. Pune" /></label><label className="form-field">Shop address<input name="address" defaultValue={data.shop.address} placeholder="Area, street, city" /></label></div><Button type="submit" className="onboarding-next">Continue <ArrowRight size={16} /></Button><div className="onboarding-safe"><ShieldCheck size={14} /> Your shop details stay private and secure.</div></form>}
-    {step === 2 && <div className="onboarding-card onboarding-products"><span className="onboarding-icon"><Package size={20} /></span><span className="eyebrow">LET'S GET YOU SET UP · STEP 2 OF 3</span><h1>Add your first products</h1><p>Start with a few favourites. You can always add more later.</p><div className="onboard-product-label"><span>PRODUCT DETAILS</span><button className="text-link" onClick={() => setProducts((current) => [...current, { name: "", category: "Grocery", price: "", stock: "", minStock: "10", unit: "packet" }])}><Plus size={14} /> Add another</button></div>{products.map((product, index) => <div className="onboard-product-row" key={index}><label className="form-field">Product name<input value={product.name} onChange={(event) => setProducts((current) => current.map((p, i) => i === index ? { ...p, name: event.target.value } : p))} placeholder="e.g. Amul Taaza Milk" /></label><label className="form-field">Category<select value={product.category} onChange={(event) => setProducts((current) => current.map((p, i) => i === index ? { ...p, category: event.target.value } : p))}><option>Grocery</option><option>Dairy</option><option>Snacks</option><option>Essentials</option><option>Household</option></select></label><div className="form-grid onboard-small-fields"><label className="form-field">Price<input type="number" min="0" value={product.price} onChange={(event) => setProducts((current) => current.map((p, i) => i === index ? { ...p, price: event.target.value } : p))} placeholder="₹ 0" /></label><label className="form-field">Stock<input type="number" min="0" value={product.stock} onChange={(event) => setProducts((current) => current.map((p, i) => i === index ? { ...p, stock: event.target.value } : p))} placeholder="0" /></label><label className="form-field">Min. stock<input type="number" min="0" value={product.minStock} onChange={(event) => setProducts((current) => current.map((p, i) => i === index ? { ...p, minStock: event.target.value } : p))} /></label><label className="form-field">Unit<select value={product.unit} onChange={(event) => setProducts((current) => current.map((p, i) => i === index ? { ...p, unit: event.target.value } : p))}><option>packet</option><option>piece</option><option>kg</option><option>litre</option></select></label></div></div>)}<div className="onboarding-actions"><Button variant="secondary" onClick={() => setStep(1)}><ArrowLeft size={15} /> Back</Button><Button onClick={finish}>Continue <ArrowRight size={16} /></Button></div><button className="skip-products" onClick={finish}>Skip for now</button></div>}
-    {step === 3 && <div className="onboarding-card ready-card"><span className="ready-check"><Check size={27} /></span><span className="eyebrow">ALL DONE · YOU'RE READY</span><h1>Your shop is ready to go.</h1><p>Your shop is ready. Start managing it through Kirana Ledger.</p><div className="ready-summary"><span className="shop-avatar">SG</span><span><strong>{data.shop.name}</strong><small>{data.shop.city} · {products.filter((p) => p.name.trim()).length} products added</small></span><CheckCheck size={19} /></div><Button className="onboarding-next" onClick={() => navigate("/dashboard")}>Open Dashboard <ArrowRight size={16} /></Button></div>}
-  </div><div className="onboarding-footer">Made with care for the people who keep our neighbourhoods running.</div></div>;
+
+  const saveShop = (event) => {
+    event.preventDefault();
+    const form = new FormData(event.currentTarget);
+    setData((current) => ({
+      ...current,
+      shop: {
+        name: form.get("shop"),
+        owner: form.get("owner"),
+        phone: form.get("phone"),
+        city: form.get("city"),
+        address: form.get("address")
+      }
+    }));
+    setStep(2);
+  };
+
+  const finish = () => {
+    const added = products.filter((p) => p.name.trim()).map((p, index) => ({
+      ...p,
+      id: `onboard-${Date.now()}-${index}`,
+      price: Number(p.price || 0),
+      stock: Number(p.stock || 0),
+      minStock: Number(p.minStock || 10),
+      sku: `NEW-${index + 1}`
+    }));
+    setData((current) => ({ ...current, products: added.length ? [...added, ...current.products] : current.products, onboardingComplete: true }));
+    setStep(3);
+  };
+
+  return <div className="onboarding-page">
+    <div className="onboarding-top">
+      <Brand />
+      <Link to="/login" className="skip-link">Already have an account? <strong>Sign in</strong></Link>
+    </div>
+    <div className="onboarding-content">
+      <div className="onboarding-progress">
+        <span className={`progress-step ${step >= 1 ? "active" : ""}`}><i>{step > 1 ? <Check size={16} /> : "1"}</i><span>Your shop</span></span>
+        <span className="progress-line" />
+        <span className={`progress-step ${step >= 2 ? "active" : ""}`}><i>{step > 2 ? <Check size={16} /> : "2"}</i><span>First products</span></span>
+        <span className="progress-line" />
+        <span className={`progress-step ${step >= 3 ? "active" : ""}`}><i>3</i><span>All set</span></span>
+      </div>
+
+      {step === 1 && (
+        <form className="onboarding-card" onSubmit={saveShop}>
+          <span className="onboarding-icon"><ShoppingBag size={22} /></span>
+          <span className="eyebrow">LET'S GET YOU SET UP · STEP 1 OF 3</span>
+          <h1>Tell us about your shop</h1>
+          <p>A few details make your experience feel right at home.</p>
+          <div className="form-grid">
+            <label className="form-field full-field">Shop name<input name="shop" required defaultValue={data.shop.name} placeholder="e.g. Sharma General Store" /></label>
+            <label className="form-field">Your name<input name="owner" required defaultValue={data.shop.owner} placeholder="Full name" /></label>
+            <label className="form-field">Mobile number<input name="phone" type="tel" required defaultValue={data.shop.phone} placeholder="+91 98765 43210" /></label>
+            <label className="form-field">City<input name="city" required defaultValue={data.shop.city} placeholder="e.g. Pune" /></label>
+            <label className="form-field">Shop address<input name="address" defaultValue={data.shop.address} placeholder="Area, street, city" /></label>
+          </div>
+          <Button type="submit" className="onboarding-next">Continue <ArrowRight size={18} /></Button>
+          <div className="onboarding-safe"><ShieldCheck size={16} /> Your shop details stay private and secure.</div>
+        </form>
+      )}
+
+      {step === 2 && (
+        <div className="onboarding-card onboarding-products">
+          <span className="onboarding-icon"><Package size={22} /></span>
+          <span className="eyebrow">LET'S GET YOU SET UP · STEP 2 OF 3</span>
+          <h1>Add your first products</h1>
+          <p>Start with a few favourites. You can always add more later.</p>
+          <div className="onboard-product-label">
+            <span>PRODUCT DETAILS</span>
+            <button className="text-link" onClick={() => setProducts((current) => [...current, { name: "", category: "Grocery", price: "", stock: "", minStock: "10", unit: "packet" }])}>
+              <Plus size={16} /> Add another
+            </button>
+          </div>
+          {products.map((product, index) => (
+            <div className="onboard-product-row" key={index}>
+              <label className="form-field">Product name<input value={product.name} onChange={(event) => setProducts((current) => current.map((p, i) => i === index ? { ...p, name: event.target.value } : p))} placeholder="e.g. Amul Taaza Milk" /></label>
+              <label className="form-field">Category<select value={product.category} onChange={(event) => setProducts((current) => current.map((p, i) => i === index ? { ...p, category: event.target.value } : p))}><option>Grocery</option><option>Dairy</option><option>Snacks</option><option>Essentials</option><option>Household</option></select></label>
+              <div className="form-grid onboard-small-fields">
+                <label className="form-field">Price<input type="number" min="0" value={product.price} onChange={(event) => setProducts((current) => current.map((p, i) => i === index ? { ...p, price: event.target.value } : p))} placeholder="₹ 0" /></label>
+                <label className="form-field">Stock<input type="number" min="0" value={product.stock} onChange={(event) => setProducts((current) => current.map((p, i) => i === index ? { ...p, stock: event.target.value } : p))} placeholder="0" /></label>
+                <label className="form-field">Min. stock<input type="number" min="0" value={product.minStock} onChange={(event) => setProducts((current) => current.map((p, i) => i === index ? { ...p, minStock: event.target.value } : p))} /></label>
+                <label className="form-field">Unit<select value={product.unit} onChange={(event) => setProducts((current) => current.map((p, i) => i === index ? { ...p, unit: event.target.value } : p))}><option>packet</option><option>piece</option><option>kg</option><option>litre</option></select></label>
+              </div>
+            </div>
+          ))}
+          <div className="onboarding-actions">
+            <Button variant="secondary" onClick={() => setStep(1)}><ArrowLeft size={16} /> Back</Button>
+            <Button onClick={finish}>Continue <ArrowRight size={18} /></Button>
+          </div>
+          <button className="skip-products" onClick={finish}>Skip for now</button>
+        </div>
+      )}
+
+      {step === 3 && (
+        <div className="onboarding-card ready-card">
+          <span className="ready-check"><Check size={30} /></span>
+          <span className="eyebrow">ALL DONE · YOU'RE READY</span>
+          <h1>Your shop is ready to go.</h1>
+          <p>Start managing inventory, tracking Udhaar, and reordering stock effortlessly.</p>
+          <div className="ready-summary">
+            <span className="shop-avatar">SG</span>
+            <span><strong>{data.shop.name}</strong><small>{data.shop.city} · {products.filter((p) => p.name.trim()).length} products added</small></span>
+            <CheckCheck size={22} />
+          </div>
+          <Button className="onboarding-next" onClick={() => navigate("/dashboard")}>Open Dashboard <ArrowRight size={18} /></Button>
+        </div>
+      )}
+    </div>
+    <div className="onboarding-footer">Made with care for the people who keep our neighbourhoods running.</div>
+  </div>;
 }
 
 function Modal({ title, children, onClose }) {
-  return <div className="modal-backdrop" onMouseDown={(event) => event.target === event.currentTarget && onClose()}><div className="modal-card" role="dialog" aria-modal="true" aria-label={title}><div className="modal-header"><h2>{title}</h2><button className="icon-button" onClick={onClose} aria-label="Close dialog"><X size={18} /></button></div>{children}</div></div>;
+  return <div className="modal-backdrop" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
+    <div className="modal-card" role="dialog" aria-modal="true" aria-label={title}>
+      <div className="modal-header">
+        <h2>{title}</h2>
+        <button className="icon-button" onClick={onClose} aria-label="Close dialog"><X size={20} /></button>
+      </div>
+      {children}
+    </div>
+  </div>;
 }
 
-function EmptyState({ title, message }) { return <div className="empty-state"><span className="empty-icon"><Package size={21} /></span><h2>{title}</h2><p>{message}</p></div>; }
+function EmptyState({ title, message }) {
+  return <div className="empty-state">
+    <span className="empty-icon"><Package size={24} /></span>
+    <h2>{title}</h2>
+    <p>{message}</p>
+  </div>;
+}
 
 function AppRoutes() {
   const location = useLocation();

@@ -1,11 +1,11 @@
 import re
-from typing import Optional, Tuple
+from typing import Optional, Tuple, Any
 from app.parser.schemas import AmbiguityType
 
 
 class AmbiguityDetector:
     @staticmethod
-    def check_ambiguity(clean_text: str) -> Tuple[bool, AmbiguityType, Optional[str]]:
+    def check_ambiguity(clean_text: str, context: Any = None) -> Tuple[bool, AmbiguityType, Optional[str]]:
         """
         Detects ambiguous or incomplete messages that should prompt for clarification
         instead of making assumptions or fabricating data.
@@ -64,7 +64,22 @@ class AmbiguityDetector:
             qty = qty_item_no_action.group(1)
             item = qty_item_no_action.group(2).strip()
             # If not a standalone phone number or date
-            if not item.isdigit() and len(item) > 1:
+            if not item.isdigit() and len(item) > 1 and item not in ["sold", "received", "damaged", "returned"]:
                 return True, AmbiguityType.MISSING_ACTION, f"Did you sell, receive, or damage {qty} {item}? (e.g. 'sold {qty} {item}')."
+
+        # 8. Action + quantity without item (e.g. "sell 5", "sold 5") when NO context item is present
+        action_qty_no_item = re.fullmatch(r"(sold|sell|received|receive|damaged|returned)\s+([0-9]+(?:\.[0-9]+)?)", text)
+        if action_qty_no_item:
+            if not (context and getattr(context, "last_item_name", None)):
+                act = action_qty_no_item.group(1)
+                qty = action_qty_no_item.group(2)
+                return True, AmbiguityType.MISSING_ITEM, f"Please specify which item you want to {act} (e.g. '{act} {qty} rice')."
+
+        # 9. Payment without customer name (e.g. "paid 200", "he paid 200") when NO context customer is present
+        pay_no_customer = re.fullmatch(r"(?:he\s+|she\s+)?(?:paid|repaid|cleared)\s+[₹]?\s*([0-9]+(?:\.[0-9]+)?)", text)
+        if pay_no_customer:
+            if not (context and getattr(context, "last_customer_name", None)):
+                amt = pay_no_customer.group(1)
+                return True, AmbiguityType.MISSING_CUSTOMER, f"Please specify who made the payment of ₹{amt} (e.g. 'Ramesh paid {amt}')."
 
         return False, AmbiguityType.NONE, None

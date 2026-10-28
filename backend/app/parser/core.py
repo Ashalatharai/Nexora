@@ -1,4 +1,4 @@
-from typing import List, Tuple
+from typing import List, Tuple, Optional, Any
 from app.parser.schemas import ParseResult, AmbiguityType
 from app.parser.normalizer import TextNormalizer
 from app.parser.ambiguity import AmbiguityDetector
@@ -9,15 +9,18 @@ from app.schemas.chat import ChatStructuredAction
 class KiranaMessageParser:
     """
     Production-grade, deterministic natural-language message parser for Kirana Chat Ledger.
-    Executes in 4 isolated phases:
+    Executes in isolated phases:
     1. Input Normalization
-    2. Ambiguity & Missing-Entity Validation
-    3. Intent Detection & Entity Extraction
-    4. Structured Contract Assembly
+    2. Read-Only Query & Confirmation Detection
+    3. Standalone Ambiguity & Incomplete Input Detection
+    4. Intent Detection & Entity Extraction (Direct Transactions)
+    5. Contextual Follow-Up Intent Resolution
+    6. Context-Aware Ambiguity Validation
+    7. Structured Contract Assembly
     """
 
     @classmethod
-    def parse(cls, raw_text: str) -> ParseResult:
+    def parse(cls, raw_text: str, context: Any = None) -> ParseResult:
         if not raw_text or not raw_text.strip():
             return ParseResult(
                 raw_message=raw_text or "",
@@ -32,9 +35,38 @@ class KiranaMessageParser:
         # Phase 1: Input Normalization
         clean = TextNormalizer.normalize(raw_text)
 
-        # Phase 2: Ambiguity & Incomplete Input Detection
-        is_ambiguous, amb_type, clarification_msg = AmbiguityDetector.check_ambiguity(clean)
-        if is_ambiguous:
+        # Phase 2: Read-Only Query & Confirmation Detection (Queries take precedence over ambiguity)
+        query_act = IntentParser.parse_query(clean)
+        if query_act:
+            if query_act.action == "confirm":
+                return ParseResult(
+                    raw_message=raw_text,
+                    clean_message=clean,
+                    intent="confirmation",
+                    success=True,
+                    actions=[query_act]
+                )
+            elif query_act.action == "cancel":
+                return ParseResult(
+                    raw_message=raw_text,
+                    clean_message=clean,
+                    intent="cancellation",
+                    success=True,
+                    actions=[query_act]
+                )
+            else:
+                return ParseResult(
+                    raw_message=raw_text,
+                    clean_message=clean,
+                    intent="query",
+                    success=True,
+                    actions=[query_act]
+                )
+
+        # Phase 3: Standalone Ambiguity Detection (e.g. negative numbers, 'sold some rice', 'add stock', '3 maggi')
+        # Note: Do not reject action+quantity here yet if context might resolve it
+        is_ambiguous, amb_type, clarification_msg = AmbiguityDetector.check_ambiguity(clean, context=context)
+        if is_ambiguous and amb_type not in [AmbiguityType.MISSING_ITEM, AmbiguityType.MISSING_CUSTOMER]:
             return ParseResult(
                 raw_message=raw_text,
                 clean_message=clean,
@@ -45,7 +77,7 @@ class KiranaMessageParser:
                 clarification_prompt=clarification_msg
             )
 
-        # Phase 3: Intent Detection & Entity Extraction
+        # Phase 4: Intent Detection & Entity Extraction (Standard Transactions)
         # Priority 1: Customer Credit Payment (e.g. "Ramesh paid 200", "received 500 from Ramesh")
         credit_payment = IntentParser.parse_credit_payment(clean)
         if credit_payment:
@@ -90,6 +122,30 @@ class KiranaMessageParser:
                 actions=inv_actions
             )
 
+        # Phase 5: Contextual Follow-Up Intent Resolution (e.g. "sell 5" when context has "rice")
+        if context:
+            followup_act = IntentParser.parse_contextual_followup(clean, context)
+            if followup_act:
+                return ParseResult(
+                    raw_message=raw_text,
+                    clean_message=clean,
+                    intent="followup_confirmation",
+                    success=True,
+                    actions=[followup_act]
+                )
+
+        # Phase 6: If an ambiguity was detected earlier for missing item/customer without context
+        if is_ambiguous:
+            return ParseResult(
+                raw_message=raw_text,
+                clean_message=clean,
+                intent="ambiguous",
+                success=False,
+                is_ambiguous=True,
+                ambiguity_type=amb_type,
+                clarification_prompt=clarification_msg
+            )
+
         # Fallback: Unrecognized
         return ParseResult(
             raw_message=raw_text,
@@ -105,6 +161,8 @@ class KiranaMessageParser:
                 "• 'damaged 2 oil bottles'\n"
                 "• 'customer returned 2 soaps'\n"
                 "• 'Ramesh took 2 rice on credit'\n"
-                "• 'Ramesh paid 200'"
+                "• 'Ramesh paid 200'\n"
+                "• 'How much rice do I have?'\n"
+                "• 'How much does Ramesh owe?'"
             )
         )

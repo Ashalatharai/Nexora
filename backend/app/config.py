@@ -24,3 +24,15 @@ CORS_ORIGINS = [
     "http://127.0.0.1:5173",
     "*"
 ]
+
+# WhatsApp Business Cloud API Configuration
+WHATSAPP_ACCESS_TOKEN = os.getenv("WHATSAPP_ACCESS_TOKEN", "")
+WHATSAPP_PHONE_NUMBER_ID = os.getenv("WHATSAPP_PHONE_NUMBER_ID", "")
+WHATSAPP_BUSINESS_ACCOUNT_ID = os.getenv("WHATSAPP_BUSINESS_ACCOUNT_ID", "")
+WHATSAPP_VERIFY_TOKEN = os.getenv("WHATSAPP_VERIFY_TOKEN", "")
+WHATSAPP_API_VERSION = os.getenv("WHATSAPP_API_VERSION", "v18.0")
+
+# Optional AI / LLM Configuration
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
+AI_API_KEY = os.getenv("AI_API_KEY", GEMINI_API_KEY)
+AI_MODEL_NAME = os.getenv("AI_MODEL_NAME", "gemini-1.5-flash")

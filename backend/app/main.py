@@ -5,7 +5,7 @@ from fastapi.responses import RedirectResponse
 
 from app.config import APP_TITLE, APP_DESCRIPTION, APP_VERSION, CORS_ORIGINS
 from app.database import init_db
-from app.routers import health, inventory, credit, alerts, summary, chat, parser
+from app.routers import health, inventory, credit, alerts, summary, chat, parser, whatsapp
 
 
 @asynccontextmanager
@@ -41,6 +41,7 @@ app.include_router(alerts.router, prefix="/api")
 app.include_router(summary.router, prefix="/api")
 app.include_router(chat.router, prefix="/api")
 app.include_router(parser.router, prefix="/api")
+app.include_router(whatsapp.router, prefix="/api")
 
 
 @app.get("/", include_in_schema=False)
