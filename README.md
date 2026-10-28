@@ -28,10 +28,6 @@ Kirana Chat Ledger allows shopkeepers to record inventory operations and custome
 * Database: SQLite
 * Message Parsing: Rule-based parsing and regular expressions
 
-## Team
-
-Four-member team participating in Byte Race 2026.
-
 ## Setup
 
 Setup instructions will be added as the application is implemented.
