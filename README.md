@@ -119,7 +119,6 @@ npm install
 npm run dev
 ```
 
-Open `http://localhost:5173`. Vite proxies requests made to `/api` to the backend at `http://127.0.0.1:8000`; keep the backend running for chat, inventory, customer, and summary API features.
 
 ## Useful commands
 
