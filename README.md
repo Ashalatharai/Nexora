@@ -106,7 +106,6 @@ python -m pip install -r backend/requirements.txt
 python backend/run.py
 ```
 
-The API is available at `http://127.0.0.1:8000`. Interactive API documentation is at `http://127.0.0.1:8000/docs`, with ReDoc at `http://127.0.0.1:8000/redoc`.
 
 On first startup, the backend creates its database tables and seeds sample inventory and customer data if those tables are empty. By default, the SQLite database is stored at `backend/kirana.db`. Set the `DATABASE_URL` environment variable before starting the backend to use a different SQLAlchemy database URL.
 
