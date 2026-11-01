@@ -263,11 +263,15 @@ CRITICAL TRANSACTION RULES:
                 product_query=params["product_name"],
                 quantity=params.get("quantity") or 1,
                 raw_query=raw_query,
-                customer_query=params.get("customer_name")
+                customer_query=params.get("customer_name"),
+                customer_phone=params.get("phone") or ""
             )
             if res["success"]:
                 cust_info = f" to {res['customer_name']}" if res.get("customer_name") else ""
-                reply = f"Recorded sale of {res['quantity']} {res['unit']}(s) of {res['product_name']}{cust_info} (₹{res['total_amount']:0.2f}). Remaining stock: {res['remaining_stock']}."
+                bal_info = f" | Credit balance: ₹{res['customer_due']:0.2f} unchanged" if res.get("customer_due") is not None else ""
+                phone_info = f" (Phone: {res['customer_phone']})" if res.get("customer_phone") else ""
+                new_cust_prefix = f"New customer '{res['customer_name']}' registered{phone_info}. " if res.get("was_new_customer") else ""
+                reply = f"{new_cust_prefix}Recorded Cash sale of {res['quantity']} {res['unit']}(s) of {res['product_name']}{cust_info} (Total: ₹{res['total_amount']:0.2f} | Payment: Cash | Stock remaining: {res['remaining_stock']}{bal_info})."
                 if res.get("warning"):
                     reply += f" ⚠️ {res['warning']}"
                 return {"reply": reply, "action_taken": "sale", "action_details": res, "clarification_needed": False}
@@ -292,11 +296,15 @@ CRITICAL TRANSACTION RULES:
                 product_query=params.get("product_name"),
                 quantity=params.get("quantity") or 1,
                 amount_override=params.get("amount"),
-                raw_query=raw_query
+                raw_query=raw_query,
+                customer_phone=params.get("phone") or ""
             )
             if res["success"]:
-                item_info = f" for {res['quantity']} {res['product_name']}" if res.get("product_name") else ""
-                reply = f"Recorded ₹{res['amount_added']:0.2f} on credit for {res['customer_name']}{item_info}. Their total Udhaar is now ₹{res['new_due_balance']:0.2f}."
+                phone_info = f" (Phone: {res['customer_phone']})" if res.get("customer_phone") else ""
+                new_cust_prefix = f"New customer '{res['customer_name']}' registered{phone_info}. " if res.get("was_new_customer") else ""
+                prod_info = f"{res['quantity']} {res['unit']}(s) of {res['product_name']}" if res.get("product_name") else "items"
+                stock_info = f" | Stock remaining: {res['remaining_stock']}" if res.get("remaining_stock") is not None else ""
+                reply = f"{new_cust_prefix}Recorded Udhaar (Credit) purchase: {prod_info} for {res['customer_name']} (Total: ₹{res['amount_added']:0.2f} | Payment: Udhaar (Credit) | Stock remaining: {res['remaining_stock']} | Updated Udhaar balance: ₹{res['new_due_balance']:0.2f})."
                 return {"reply": reply, "action_taken": "credit", "action_details": res, "clarification_needed": False}
             return {"reply": res["error"], "action_taken": "none", "clarification_needed": res.get("clarification_needed", False)}
 
@@ -308,7 +316,7 @@ CRITICAL TRANSACTION RULES:
                 raw_query=raw_query
             )
             if res["success"]:
-                reply = f"Payment noted! {res['customer_name']} paid ₹{res['amount_paid']:0.2f}. Remaining balance: ₹{res['new_due']:0.2f}."
+                reply = f"Payment recorded! {res['customer_name']} paid ₹{res['amount_paid']:0.2f} in Cash. Updated Udhaar balance: ₹{res['new_due']:0.2f} (Inventory unchanged)."
                 return {"reply": reply, "action_taken": "payment", "action_details": res, "clarification_needed": False}
             return {"reply": res["error"], "action_taken": "none", "clarification_needed": res.get("clarification_needed", False)}
 
@@ -363,11 +371,22 @@ CRITICAL TRANSACTION RULES:
     @classmethod
     def _extract_quantity(cls, text: str) -> int:
         """Extract numeric quantity or word-based quantity."""
-        lower = text.lower()
-        # Direct digit
-        m = re.search(r"\b(\d+)\b", lower)
+        # Strip phone numbers first so 10-digit phones are not mistaken for product quantity
+        clean = re.sub(r"(?:phone|mobile|number|#)?[:\s]*\+?\d[\d\s-]{7,}\d", "", text, flags=re.IGNORECASE)
+        # Also strip rupee amounts (e.g. ₹200 or rs 200) so payments/prices are not mistaken for product quantity
+        clean = re.sub(r"(?:₹|rs\.?\s*)\d+(?:\.\d+)?", "", clean, flags=re.IGNORECASE)
+        lower = clean.lower()
+
+        # Check for digit before product or unit (e.g. "2 maggi", "3 rice", "2 packets")
+        m_unit = re.search(r"\b(\d+)\s*(?:packets?|units?|bottles?|pcs?|kg|litres?|l|pack|packs|bags?|cans?|boxes?)\b", lower)
+        if m_unit:
+            return int(m_unit.group(1))
+
+        # Check for digit
+        m = re.search(r"\b(\d{1,4})\b", lower)
         if m:
             return int(m.group(1))
+
         # Word number
         for word, val in WORD_NUMBERS.items():
             if re.search(rf"\b{word}\b", lower):
@@ -375,14 +394,27 @@ CRITICAL TRANSACTION RULES:
         return 1
 
     @classmethod
-    def _extract_customer_name(cls, cursor, text: str) -> Tuple[Optional[dict], Optional[str]]:
-        """Identify matched customer dict and/or raw customer name string."""
-        # 1. Direct match with registered customers
+    def _extract_customer_name(cls, cursor, text: str) -> Tuple[Optional[dict], Optional[str], str]:
+        """Identify matched customer dict, raw customer name string, and optional customer phone."""
+        # 1. Check for new customer purchase pattern: e.g. "New customer Priya with phone 9876543210 bought 2 Maggi"
+        new_cust_pat = r'\b(?:new\s+customer|customer)\s+([A-Za-z\s]+?)(?:[,\s]+(?:with\s+phone|phone|mobile|number|#)?[:\s]*(\+?\d[\d\s-]{7,}\d))?(?:\s+(?:bought|took|paid|purchased|wants|ordered|for|on)|$)'
+        m_new = re.search(new_cust_pat, text, re.IGNORECASE)
+        if m_new:
+            cand = m_new.group(1).strip()
+            cand = re.sub(r"[^\w\s]", "", cand).strip()
+            phone = m_new.group(2).strip() if m_new.group(2) else ""
+            if cand and cand.lower() not in {"today", "yesterday", "how", "much", "stock", "maggi", "milk", "salt", "atta", "rice"}:
+                c_lookup = match_customer(cursor, cand)
+                if c_lookup:
+                    return c_lookup, c_lookup["name"], c_lookup.get("phone", "")
+                return None, cand, phone
+
+        # 2. Direct match with registered customers
         matched_c = match_customer(cursor, text)
         if matched_c:
-            return matched_c, matched_c["name"]
+            return matched_c, matched_c["name"], matched_c.get("phone", "")
 
-        # 2. Extract potential customer name using sentence structure
+        # 3. Extract potential customer name using sentence structure
         patterns = [
             r"^([A-Z][a-zA-Z]+)\s+(?:bought|took|paid|purchased)\b",
             r"\b(?:to|from|for)\s+([A-Z][a-zA-Z]+)\b",
@@ -396,10 +428,10 @@ CRITICAL TRANSACTION RULES:
                 if cand.lower() not in {"today", "yesterday", "how", "much", "stock", "maggi", "milk", "salt", "atta", "rice"}:
                     c_lookup = match_customer(cursor, cand)
                     if c_lookup:
-                        return c_lookup, c_lookup["name"]
-                    return None, cand
+                        return c_lookup, c_lookup["name"], c_lookup.get("phone", "")
+                    return None, cand, ""
 
-        return None, None
+        return None, None, ""
 
     @classmethod
     def _extract_new_customer_details(cls, text: str) -> Tuple[Optional[str], Optional[str]]:
@@ -509,13 +541,15 @@ CRITICAL TRANSACTION RULES:
                 current_action = "restock"
             elif chunk_has_credit:
                 if cust_to_use and not chunk_c and not re.search(rf"\b{re.escape(cust_to_use.lower())}\b", c_lower):
-                    normalized_chunks.append(f"{cust_to_use} took {chunk}")
+                    clean_c = re.sub(r"^(?:took|takes|bought|buy)\s+", "", chunk, flags=re.IGNORECASE)
+                    normalized_chunks.append(f"{cust_to_use} took {clean_c}")
                 else:
                     normalized_chunks.append(chunk)
                 current_action = "credit"
             elif chunk_has_payment:
                 if cust_to_use and not chunk_c and not re.search(rf"\b{re.escape(cust_to_use.lower())}\b", c_lower):
-                    normalized_chunks.append(f"{cust_to_use} {chunk}")
+                    clean_c = re.sub(r"^(?:paid|pay)\s+", "", chunk, flags=re.IGNORECASE)
+                    normalized_chunks.append(f"{cust_to_use} paid {clean_c}")
                 else:
                     normalized_chunks.append(chunk)
             elif chunk_p:
@@ -582,7 +616,7 @@ CRITICAL TRANSACTION RULES:
         conn = get_db_connection()
         cursor = conn.cursor()
 
-        matched_c, cust_name = cls._extract_customer_name(cursor, raw)
+        matched_c, cust_name, cust_phone = cls._extract_customer_name(cursor, raw)
         matched_p, prod_query = cls._extract_product_info(cursor, raw, cust_name)
         qty = cls._extract_quantity(raw)
 
@@ -757,7 +791,7 @@ CRITICAL TRANSACTION RULES:
 
         # ---------------------------------------------------------------------
         # 8. Action: CUSTOMER CREDIT (UDHAAR)
-        # e.g. "Deeksha took 2 Maggi on credit", "Ramesh took 2 rice on credit", "Amit credit ₹250"
+        # e.g. "Deeksha took 2 Maggi on credit", "Ramesh took 3 rice on udhaar", "Amit credit ₹250"
         # ---------------------------------------------------------------------
         is_credit = bool(
             re.search(r"\b(on credit|credit|udhaar|khata|baki)\b", lower) or
@@ -782,11 +816,14 @@ CRITICAL TRANSACTION RULES:
                 }
 
             target_prod = matched_p["name"] if matched_p else (prod_query if prod_query else None)
-            res = RuleParser.execute_credit(cust_name, target_prod, qty, amount_override, raw)
+            res = RuleParser.execute_credit(cust_name, target_prod, qty, amount_override, raw, customer_phone=cust_phone)
             if res["success"]:
-                item_info = f" for {res['quantity']} {res['product_name']}" if res.get("product_name") else ""
+                phone_info = f" (Phone: {res['customer_phone']})" if res.get("customer_phone") else ""
+                new_cust_prefix = f"New customer '{res['customer_name']}' registered{phone_info}. " if res.get("was_new_customer") else ""
+                prod_info = f"{res['quantity']} {res['unit']}(s) of {res['product_name']}" if res.get("product_name") else "items"
+                stock_info = f" | Stock remaining: {res['remaining_stock']}" if res.get("remaining_stock") is not None else ""
                 return {
-                    "reply": f"Recorded ₹{res['amount_added']:0.2f} on credit for {res['customer_name']}{item_info}. Their total Udhaar is now ₹{res['new_due_balance']:0.2f}.",
+                    "reply": f"{new_cust_prefix}Recorded Udhaar (Credit) purchase: {prod_info} for {res['customer_name']} (Total: ₹{res['amount_added']:0.2f} | Payment: Udhaar (Credit) | Stock remaining: {res['remaining_stock']} | Updated Udhaar balance: ₹{res['new_due_balance']:0.2f}).",
                     "action_taken": "credit",
                     "action_details": res,
                     "clarification_needed": False
@@ -823,7 +860,7 @@ CRITICAL TRANSACTION RULES:
             res = RuleParser.execute_payment(cust_name, amount, raw)
             if res["success"]:
                 return {
-                    "reply": f"Payment noted! {res['customer_name']} paid ₹{res['amount_paid']:0.2f}. Remaining balance: ₹{res['new_due']:0.2f}.",
+                    "reply": f"Payment recorded! {res['customer_name']} paid ₹{res['amount_paid']:0.2f} in Cash. Updated Udhaar balance: ₹{res['new_due']:0.2f} (Inventory unchanged).",
                     "action_taken": "payment",
                     "action_details": res,
                     "clarification_needed": False
@@ -836,7 +873,7 @@ CRITICAL TRANSACTION RULES:
 
         # ---------------------------------------------------------------------
         # 10. Ambiguity Check: "took" without specifying cash or credit
-        # e.g. "Deeksha took 2 Maggi"
+        # e.g. "Deeksha took 2 Maggi", "Ramesh took 2 Maggi"
         # ---------------------------------------------------------------------
         if re.search(r"\b(took|takes|taken)\b", lower) and not re.search(r"\b(credit|udhaar|cash|paid)\b", lower):
             prod_name = matched_p["name"] if matched_p else (prod_query if prod_query else "items")
@@ -847,8 +884,16 @@ CRITICAL TRANSACTION RULES:
                 "clarification_needed": True
             }
 
+        # Check for new customer purchase with missing name
+        if re.search(r"\bnew\s+customer\b", lower) and not cust_name:
+            return {
+                "reply": "What is the new customer's name? Please specify their name before recording the transaction.",
+                "action_taken": "none",
+                "clarification_needed": True
+            }
+
         # ---------------------------------------------------------------------
-        # 11. Action: SALES (e.g. "Deeksha bought 2 maggie", "Sold 2 Maggi to Deeksha", "Sold 2 Chocolate bars")
+        # 11. Action: SALES (e.g. "Deeksha bought 2 maggie", "Sold 2 Maggi to Deeksha", "Ramesh bought 2 Maggi for cash")
         # ---------------------------------------------------------------------
         is_sale = bool(re.search(r"\b(bought|buy|buys|purchased|purchase|sold|sell|sale|sells)\b", lower))
         if is_sale:
@@ -860,10 +905,13 @@ CRITICAL TRANSACTION RULES:
                 }
 
             target_prod = matched_p["name"] if matched_p else prod_query
-            res = RuleParser.execute_sale(target_prod, qty, raw, cust_name)
+            res = RuleParser.execute_sale(target_prod, qty, raw, cust_name, customer_phone=cust_phone)
             if res["success"]:
                 cust_info = f" to {res['customer_name']}" if res.get("customer_name") else ""
-                reply = f"Recorded sale of {qty} {res['unit']}(s) of {res['product_name']}{cust_info} (₹{res['total_amount']:0.2f}). Remaining stock: {res['remaining_stock']}."
+                bal_info = f" | Credit balance: ₹{res['customer_due']:0.2f} unchanged" if res.get("customer_due") is not None else ""
+                phone_info = f" (Phone: {res['customer_phone']})" if res.get("customer_phone") else ""
+                new_cust_prefix = f"New customer '{res['customer_name']}' registered{phone_info}. " if res.get("was_new_customer") else ""
+                reply = f"{new_cust_prefix}Recorded Cash sale of {qty} {res['unit']}(s) of {res['product_name']}{cust_info} (Total: ₹{res['total_amount']:0.2f} | Payment: Cash | Stock remaining: {res['remaining_stock']}{bal_info})."
                 if res.get("warning"):
                     reply += f" ⚠️ {res['warning']}"
                 return {

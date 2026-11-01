@@ -191,7 +191,7 @@ def extract_candidate_product(raw_text: str, customer_name: str = None) -> str:
 
 class RuleParser:
     @staticmethod
-    def execute_sale(product_query: str, quantity: int = 1, raw_query: str = "", customer_query: str = None) -> dict:
+    def execute_sale(product_query: str, quantity: int = 1, raw_query: str = "", customer_query: str = None, customer_phone: str = "") -> dict:
         """
         Safely execute sale:
         - Validates product existence
@@ -247,8 +247,20 @@ class RuleParser:
                 (new_stock, product["id"])
             )
 
-            # Link customer if known
+            # Link customer if known, or auto-create if new customer
             customer = match_customer(cursor, customer_query) if customer_query else None
+            was_new_customer = False
+            cust_phone = customer_phone.strip() if customer_phone else ""
+            if not customer and customer_query and len(customer_query.strip()) >= 2:
+                c_clean = customer_query.strip()
+                create_res = RuleParser._create_customer_with_cursor(cursor, c_clean, phone=cust_phone)
+                if create_res["success"]:
+                    customer = {"id": create_res["customer_id"], "name": create_res["customer_name"], "due": 0.0, "phone": create_res.get("phone", "")}
+                    was_new_customer = True
+                    cust_phone = create_res.get("phone", "")
+                elif create_res.get("customer"):
+                    customer = create_res["customer"]
+
             cust_id = customer["id"] if customer else None
             cust_label = customer["name"] if customer else (customer_query.strip() if customer_query else "")
             detail_suffix = f" ({cust_label})" if cust_label else ""
@@ -281,8 +293,12 @@ class RuleParser:
             "quantity": quantity,
             "total_amount": total_amount,
             "profit": profit,
+            "payment_type": "Cash",
             "remaining_stock": new_stock,
             "customer_name": cust_label or None,
+            "customer_due": customer["due"] if customer else None,
+            "was_new_customer": was_new_customer,
+            "customer_phone": cust_phone,
             "warning": warning
         }
 
@@ -333,7 +349,7 @@ class RuleParser:
         }
 
     @staticmethod
-    def execute_credit(customer_query: str, product_query: str = None, quantity: int = 1, amount_override: float = None, raw_query: str = "") -> dict:
+    def execute_credit(customer_query: str, product_query: str = None, quantity: int = 1, amount_override: float = None, raw_query: str = "", customer_phone: str = "") -> dict:
         """
         Safely record a credit (udhaar) transaction:
         - Validates customer exists
@@ -344,16 +360,28 @@ class RuleParser:
         with db_transaction() as conn:
             cursor = conn.cursor()
 
-            # 1. Customer verification
+            # 1. Customer verification / creation
             customer = match_customer(cursor, customer_query) if customer_query else None
+            was_new_customer = False
+            cust_phone = customer_phone.strip() if customer_phone else ""
             if not customer:
-                c_name = customer_query.strip() if customer_query else "Unknown"
-                return {
-                    "success": False,
-                    "error_type": "CUSTOMER_NOT_FOUND",
-                    "error": f"Customer Not Found: '{c_name}' is not in your customer records. Please check the name or add the customer first.",
-                    "clarification_needed": True
-                }
+                if customer_query and len(customer_query.strip()) >= 2:
+                    create_res = RuleParser._create_customer_with_cursor(cursor, customer_query.strip(), phone=cust_phone)
+                    if create_res["success"]:
+                        customer = {"id": create_res["customer_id"], "name": create_res["customer_name"], "due": 0.0, "phone": create_res.get("phone", "")}
+                        was_new_customer = True
+                        cust_phone = create_res.get("phone", "")
+                    elif create_res.get("customer"):
+                        customer = create_res["customer"]
+
+                if not customer:
+                    c_name = customer_query.strip() if customer_query else "Unknown"
+                    return {
+                        "success": False,
+                        "error_type": "CUSTOMER_NOT_FOUND",
+                        "error": f"Customer Not Found: '{c_name}' is not in your customer records. Please check the name or add the customer first.",
+                        "clarification_needed": True
+                    }
 
             # 2. Product verification and stock check (if product specified)
             product = None
@@ -436,10 +464,15 @@ class RuleParser:
             "customer_id": customer["id"],
             "customer_name": customer["name"],
             "amount_added": total_amount,
+            "total_amount": total_amount,
+            "payment_type": "Udhaar (Credit)",
             "new_due_balance": new_due,
             "product_name": product["name"] if product else None,
+            "unit": product["unit"] if product else "item",
             "quantity": quantity if product else None,
-            "remaining_stock": new_stock
+            "remaining_stock": new_stock,
+            "was_new_customer": was_new_customer,
+            "customer_phone": cust_phone
         }
 
     @staticmethod
@@ -464,7 +497,23 @@ class RuleParser:
                     "clarification_needed": True
                 }
 
-            new_due = max(0.0, round(customer["due"] - amount, 2))
+            if customer["due"] <= 0:
+                return {
+                    "success": False,
+                    "error_type": "NO_OUTSTANDING_BALANCE",
+                    "error": f"Payment not recorded: {customer['name']} has no outstanding Udhaar balance (₹0.00).",
+                    "clarification_needed": False
+                }
+
+            if amount > customer["due"]:
+                return {
+                    "success": False,
+                    "error_type": "PAYMENT_EXCEEDS_DUE",
+                    "error": f"Payment not recorded: Payment amount (₹{amount:0.2f}) exceeds {customer['name']}'s outstanding Udhaar balance of ₹{customer['due']:0.2f}.",
+                    "clarification_needed": False
+                }
+
+            new_due = round(customer["due"] - amount, 2)
             cursor.execute(
                 "UPDATE customers SET due = ?, last_active = 'Today', updated_at = CURRENT_TIMESTAMP WHERE id = ?",
                 (new_due, customer["id"])
@@ -489,18 +538,14 @@ class RuleParser:
             "customer_id": customer["id"],
             "customer_name": customer["name"],
             "amount_paid": amount,
+            "payment_type": "Cash",
             "previous_due": customer["due"],
             "new_due": new_due
         }
 
     @staticmethod
-    def execute_create_customer(name: str, phone: str = "", raw_query: str = "") -> dict:
-        """
-        Safely registers a new customer in SQLite:
-        - Prevents duplicates by exact name or phone number
-        - Returns existing customer info if duplicate detected
-        - Saves new customer with initial due 0.0
-        """
+    def _create_customer_with_cursor(cursor, name: str, phone: str = "", raw_query: str = "") -> dict:
+        """Helper to create customer using an existing cursor / transaction."""
         name_clean = name.strip()
         phone_clean = phone.strip()
         if not name_clean:
@@ -510,52 +555,49 @@ class RuleParser:
                 "clarification_needed": True
             }
 
-        with db_transaction() as conn:
-            cursor = conn.cursor()
+        # 1. Duplicate check by name (case-insensitive exact match)
+        cursor.execute("SELECT * FROM customers WHERE LOWER(TRIM(name)) = LOWER(TRIM(?))", (name_clean,))
+        existing = cursor.fetchone()
+        if existing:
+            cust = dict_from_row(existing)
+            phone_str = f" (Phone: {cust['phone']})" if cust.get("phone") else ""
+            due_str = f", current Udhaar: ₹{cust['due']:.2f}" if cust.get("due", 0) > 0 else ""
+            return {
+                "success": False,
+                "error_type": "CUSTOMER_ALREADY_EXISTS",
+                "error": f"Customer '{cust['name']}' already exists in your records{phone_str}{due_str}. No duplicate was created.",
+                "customer": cust,
+                "clarification_needed": False
+            }
 
-            # 1. Duplicate check by name (case-insensitive exact match)
-            cursor.execute("SELECT * FROM customers WHERE LOWER(TRIM(name)) = LOWER(TRIM(?))", (name_clean,))
-            existing = cursor.fetchone()
-            if existing:
-                cust = dict_from_row(existing)
-                phone_str = f" (Phone: {cust['phone']})" if cust.get("phone") else ""
-                due_str = f", current Udhaar: ₹{cust['due']:.2f}" if cust.get("due", 0) > 0 else ""
-                return {
-                    "success": False,
-                    "error_type": "CUSTOMER_ALREADY_EXISTS",
-                    "error": f"Customer '{cust['name']}' already exists in your records{phone_str}{due_str}. No duplicate was created.",
-                    "customer": cust,
-                    "clarification_needed": False
-                }
+        # 2. Duplicate check by phone (if provided)
+        if phone_clean:
+            clean_digits = re.sub(r"\D", "", phone_clean)
+            if len(clean_digits) >= 10:
+                cursor.execute("SELECT * FROM customers WHERE phone != ''")
+                for row in cursor.fetchall():
+                    existing_phone_digits = re.sub(r"\D", "", row["phone"])
+                    if existing_phone_digits and existing_phone_digits[-10:] == clean_digits[-10:]:
+                        cust = dict_from_row(row)
+                        return {
+                            "success": False,
+                            "error_type": "CUSTOMER_ALREADY_EXISTS",
+                            "error": f"A customer with phone '{phone_clean}' already exists in your records ({cust['name']}). No duplicate was created.",
+                            "customer": cust,
+                            "clarification_needed": False
+                        }
 
-            # 2. Duplicate check by phone (if provided)
-            if phone_clean:
-                clean_digits = re.sub(r"\D", "", phone_clean)
-                if len(clean_digits) >= 10:
-                    cursor.execute("SELECT * FROM customers WHERE phone != ''")
-                    for row in cursor.fetchall():
-                        existing_phone_digits = re.sub(r"\D", "", row["phone"])
-                        if existing_phone_digits and existing_phone_digits[-10:] == clean_digits[-10:]:
-                            cust = dict_from_row(row)
-                            return {
-                                "success": False,
-                                "error_type": "CUSTOMER_ALREADY_EXISTS",
-                                "error": f"A customer with phone '{phone_clean}' already exists in your records ({cust['name']}). No duplicate was created.",
-                                "customer": cust,
-                                "clarification_needed": False
-                            }
+        # 3. Create new customer
+        cid = f"c{int(datetime.now().timestamp() * 1000)}"
+        words = name_clean.split()
+        initials = "".join([w[0].upper() for w in words[:2]]) or name_clean[:2].upper()
+        colors = ["mint", "lavender", "peach", "blue", "sand", "rose"]
+        color = colors[int(datetime.now().timestamp()) % len(colors)]
 
-            # 3. Create new customer
-            cid = f"c{int(datetime.now().timestamp() * 1000)}"
-            words = name_clean.split()
-            initials = "".join([w[0].upper() for w in words[:2]]) or name_clean[:2].upper()
-            colors = ["mint", "lavender", "peach", "blue", "sand", "rose"]
-            color = colors[int(datetime.now().timestamp()) % len(colors)]
-
-            cursor.execute("""
-                INSERT INTO customers (id, name, phone, due, last_active, initials, color)
-                VALUES (?, ?, ?, 0.0, 'Today', ?, ?)
-            """, (cid, name_clean, phone_clean, initials, color))
+        cursor.execute("""
+            INSERT INTO customers (id, name, phone, due, last_active, initials, color)
+            VALUES (?, ?, ?, 0.0, 'Today', ?, ?)
+        """, (cid, name_clean, phone_clean, initials, color))
 
         return {
             "success": True,
@@ -565,3 +607,16 @@ class RuleParser:
             "initials": initials,
             "color": color
         }
+
+    @staticmethod
+    def execute_create_customer(name: str, phone: str = "", raw_query: str = "", conn=None) -> dict:
+        """
+        Safely registers a new customer in SQLite:
+        - Prevents duplicates by exact name or phone number
+        - Returns existing customer info if duplicate detected
+        - Saves new customer with initial due 0.0
+        """
+        if conn is not None:
+            return RuleParser._create_customer_with_cursor(conn.cursor(), name, phone, raw_query)
+        with db_transaction() as trans_conn:
+            return RuleParser._create_customer_with_cursor(trans_conn.cursor(), name, phone, raw_query)

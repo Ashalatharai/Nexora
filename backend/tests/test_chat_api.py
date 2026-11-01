@@ -245,26 +245,26 @@ class KiranaChatAPITestCase(unittest.TestCase):
         maggi_after = next(p for p in data["store_state"]["products"] if "Maggi" in p["name"])
         self.assertEqual(maggi_after["stock"], stock_before - 2)
 
-    def test_13_deeksha_paid_100(self):
+    def test_13_deeksha_paid_20(self):
         """
         Verify payment:
-        'Deeksha paid 100'
-        Reduces Deeksha's pending credit balance.
+        'Deeksha paid 20'
+        Reduces Deeksha's pending credit balance (was 28 from previous credit test).
         """
         state = self.client.get("/api/store/state").json()
         deeksha = next(c for c in state["customers"] if "Deeksha" in c["name"])
         due_before = deeksha["due"]
 
-        payload = {"message": "Deeksha paid 100", "session_id": "test_sess"}
+        payload = {"message": "Deeksha paid 20", "session_id": "test_sess"}
         response = self.client.post("/api/chat", json=payload)
         self.assertEqual(response.status_code, 200)
         data = response.json()
         self.assertEqual(data["action_taken"], "payment")
-        self.assertIn("Payment noted", data["reply"])
+        self.assertIn("Payment recorded", data["reply"])
         self.assertIn("Deeksha", data["reply"])
 
         deeksha_after = next(c for c in data["store_state"]["customers"] if "Deeksha" in c["name"])
-        self.assertEqual(deeksha_after["due"], max(0.0, due_before - 100))
+        self.assertEqual(deeksha_after["due"], due_before - 20)
 
     def test_14_ambiguous_direction_clarification(self):
         """
@@ -427,6 +427,246 @@ class KiranaChatAPITestCase(unittest.TestCase):
         # Due should be: due_before + (2 * price) - 50
         expected_due = max(0.0, due_before + (2 * milk["price"]) - 50)
         self.assertEqual(ramesh_after["due"], expected_due)
+
+    def test_23_cash_purchase_ramesh(self):
+        """
+        Requirement 2: CASH PURCHASE
+        'Ramesh bought 2 Maggi for cash'
+        - Identifies customer, product, quantity, payment type Cash
+        - Reduces inventory by 2
+        - Records sale as paid/cash
+        - Customer credit balance is NOT increased
+        - Confirmation includes item, quantity, amount, payment type, stock remaining, credit balance
+        """
+        state = self.client.get("/api/store/state").json()
+        ramesh_before = next(c for c in state["customers"] if c["name"] == "Ramesh")
+        maggi_before = next(p for p in state["products"] if "Maggi" in p["name"])
+
+        payload = {"message": "Ramesh bought 2 Maggi for cash", "session_id": "test_sess"}
+        response = self.client.post("/api/chat", json=payload)
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertEqual(data["action_taken"], "sale")
+        self.assertIn("Cash", data["reply"])
+        self.assertIn("Maggi", data["reply"])
+        self.assertIn("Stock remaining", data["reply"])
+
+        # Check stock reduced by 2
+        maggi_after = next(p for p in data["store_state"]["products"] if "Maggi" in p["name"])
+        self.assertEqual(maggi_after["stock"], maggi_before["stock"] - 2)
+
+        # Check Ramesh due balance did NOT increase
+        ramesh_after = next(c for c in data["store_state"]["customers"] if c["id"] == ramesh_before["id"])
+        self.assertEqual(ramesh_after["due"], ramesh_before["due"])
+
+    def test_24_udhaar_purchase_ramesh(self):
+        """
+        Requirement 3: UDHAAR PURCHASE
+        'Ramesh took 3 rice on udhaar'
+        - Reduces inventory by 3
+        - Calculates total using selling price (120 * 3 = 360)
+        - Records transaction as credit
+        - Increases Ramesh's outstanding balance
+        """
+        state = self.client.get("/api/store/state").json()
+        ramesh_before = next(c for c in state["customers"] if c["name"] == "Ramesh")
+        rice_before = next(p for p in state["products"] if "Rice" in p["name"])
+
+        payload = {"message": "Ramesh took 3 rice on udhaar", "session_id": "test_sess"}
+        response = self.client.post("/api/chat", json=payload)
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertEqual(data["action_taken"], "credit")
+        self.assertIn("Udhaar", data["reply"])
+        self.assertIn("Rice", data["reply"])
+        self.assertIn("Stock remaining", data["reply"])
+
+        # Check stock reduced by 3
+        rice_after = next(p for p in data["store_state"]["products"] if "Rice" in p["name"])
+        self.assertEqual(rice_after["stock"], rice_before["stock"] - 3)
+
+        # Check Ramesh balance increased by 3 * 120 = 360
+        ramesh_after = next(c for c in data["store_state"]["customers"] if c["id"] == ramesh_before["id"])
+        self.assertEqual(ramesh_after["due"], ramesh_before["due"] + 360.0)
+
+    def test_25_customer_payment_ramesh(self):
+        """
+        Requirement 4: CUSTOMER PAYMENT
+        'Ramesh paid ₹200'
+        - Reduces outstanding balance by 200
+        - Does NOT change inventory
+        """
+        state = self.client.get("/api/store/state").json()
+        ramesh_before = next(c for c in state["customers"] if c["name"] == "Ramesh")
+        stock_snapshot = {p["id"]: p["stock"] for p in state["products"]}
+
+        payload = {"message": "Ramesh paid ₹200", "session_id": "test_sess"}
+        response = self.client.post("/api/chat", json=payload)
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertEqual(data["action_taken"], "payment")
+        self.assertIn("paid ₹200", data["reply"])
+        self.assertIn("Inventory unchanged", data["reply"])
+
+        # Check balance reduced by 200
+        ramesh_after = next(c for c in data["store_state"]["customers"] if c["id"] == ramesh_before["id"])
+        self.assertEqual(ramesh_after["due"], ramesh_before["due"] - 200.0)
+
+        # Verify inventory untouched
+        for p in data["store_state"]["products"]:
+            self.assertEqual(p["stock"], stock_snapshot[p["id"]])
+
+    def test_26_customer_payment_exceeding_balance(self):
+        """
+        Requirement 4: Prevent payments exceeding outstanding balance
+        'Ramesh paid 50000'
+        - Rejected with clear error message
+        - Balance untouched
+        """
+        state = self.client.get("/api/store/state").json()
+        ramesh_before = next(c for c in state["customers"] if c["name"] == "Ramesh")
+
+        payload = {"message": "Ramesh paid 50000", "session_id": "test_sess"}
+        response = self.client.post("/api/chat", json=payload)
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertEqual(data["action_taken"], "none")
+        self.assertIn("exceeds", data["reply"].lower())
+
+        # Balance remains unchanged
+        ramesh_after = next(c for c in data["store_state"]["customers"] if c["id"] == ramesh_before["id"])
+        self.assertEqual(ramesh_after["due"], ramesh_before["due"])
+
+    def test_27_customer_payment_zero_balance(self):
+        """
+        Requirement 4: Prevent payments when customer has zero balance
+        'Kavita Shah paid 100' (Kavita Shah has 0 due)
+        - Rejected with clear error message
+        """
+        payload = {"message": "Kavita Shah paid 100", "session_id": "test_sess"}
+        response = self.client.post("/api/chat", json=payload)
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertEqual(data["action_taken"], "none")
+        self.assertIn("no outstanding", data["reply"].lower())
+
+    def test_28_new_customer_purchase_cash(self):
+        """
+        Requirement 5: NEW CUSTOMER PURCHASE (Cash)
+        'New customer Priya with phone 9899988877 bought 2 Maggi for cash'
+        - Auto-creates customer 'Priya' with phone in SQLite
+        - Deducts 2 Maggi
+        - Records Cash sale
+        - Credit balance remains 0
+        - Confirmation includes customer registration note
+        """
+        maggi_before = next(p for p in self.client.get("/api/store/state").json()["products"] if "Maggi" in p["name"])["stock"]
+
+        payload = {"message": "New customer Priya with phone 9899988877 bought 2 Maggi for cash", "session_id": "test_sess"}
+        response = self.client.post("/api/chat", json=payload)
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertEqual(data["action_taken"], "sale")
+        self.assertIn("Priya", data["reply"])
+        self.assertIn("Cash", data["reply"])
+
+        # Customer is now in customer list
+        priya = next((c for c in data["store_state"]["customers"] if c["name"] == "Priya"), None)
+        self.assertIsNotNone(priya)
+        self.assertEqual(priya["phone"], "9899988877")
+        self.assertEqual(priya["due"], 0.0)
+
+        # Maggi stock reduced
+        maggi_after = next(p for p in data["store_state"]["products"] if "Maggi" in p["name"])["stock"]
+        self.assertEqual(maggi_after, maggi_before - 2)
+
+    def test_29_new_customer_purchase_udhaar(self):
+        """
+        Requirement 5: NEW CUSTOMER PURCHASE (Udhaar)
+        'New customer Anita with phone 9811122233 took 1 milk on udhaar'
+        - Auto-creates customer 'Anita' with phone in SQLite
+        - Deducts 1 Milk
+        - Records Udhaar purchase
+        - Credit balance set to price of 1 milk (28)
+        """
+        state = self.client.get("/api/store/state").json()
+        milk = next(p for p in state["products"] if "Milk" in p["name"])
+        milk_before = milk["stock"]
+
+        payload = {"message": "New customer Anita with phone 9811122233 took 1 milk on udhaar", "session_id": "test_sess"}
+        response = self.client.post("/api/chat", json=payload)
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertEqual(data["action_taken"], "credit")
+        self.assertIn("Anita", data["reply"])
+        self.assertIn("Udhaar", data["reply"])
+
+        # Anita created with due = 28
+        anita = next((c for c in data["store_state"]["customers"] if c["name"] == "Anita"), None)
+        self.assertIsNotNone(anita)
+        self.assertEqual(anita["phone"], "9811122233")
+        self.assertEqual(anita["due"], milk["price"])
+
+        milk_after = next(p for p in data["store_state"]["products"] if "Milk" in p["name"])["stock"]
+        self.assertEqual(milk_after, milk_before - 1)
+
+    def test_30_missing_payment_type_clarification(self):
+        """
+        Requirement 6: VALIDATION (Missing payment type)
+        'Ramesh took 2 Maggi'
+        - Asks whether transaction was cash or udhaar
+        - No transaction recorded
+        """
+        payload = {"message": "Ramesh took 2 Maggi", "session_id": "test_sess"}
+        response = self.client.post("/api/chat", json=payload)
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertTrue(data["clarification_needed"])
+        self.assertIn("cash", data["reply"].lower())
+        self.assertIn("credit", data["reply"].lower())
+
+    def test_31_new_customer_missing_name_clarification(self):
+        """
+        Requirement 5: If required customer info is missing, ask for it
+        'New customer bought 2 Maggi for cash'
+        - Asks for new customer name
+        - No transaction recorded
+        """
+        payload = {"message": "New customer bought 2 Maggi for cash", "session_id": "test_sess"}
+        response = self.client.post("/api/chat", json=payload)
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertTrue(data["clarification_needed"])
+        self.assertIn("name", data["reply"].lower())
+
+    def test_32_compound_cash_and_udhaar(self):
+        """
+        Requirement 6: Handle multiple items in one message
+        'Ramesh bought 2 Maggi for cash and took 1 milk on udhaar'
+        - Executes both transactions in sequence
+        - Deducts 2 Maggi and 1 Milk
+        - Increases Udhaar balance only for Milk
+        """
+        state = self.client.get("/api/store/state").json()
+        maggi_before = next(p for p in state["products"] if "Maggi" in p["name"])["stock"]
+        milk = next(p for p in state["products"] if "Milk" in p["name"])
+        milk_before = milk["stock"]
+        ramesh_before = next(c for c in state["customers"] if c["name"] == "Ramesh")["due"]
+
+        payload = {"message": "Ramesh bought 2 Maggi for cash and took 1 milk on udhaar", "session_id": "test_sess"}
+        response = self.client.post("/api/chat", json=payload)
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertEqual(data["action_taken"], "multi")
+
+        state_after = data["store_state"]
+        maggi_after = next(p for p in state_after["products"] if "Maggi" in p["name"])["stock"]
+        milk_after = next(p for p in state_after["products"] if "Milk" in p["name"])["stock"]
+        ramesh_after = next(c for c in state_after["customers"] if c["name"] == "Ramesh")["due"]
+
+        self.assertEqual(maggi_after, maggi_before - 2)
+        self.assertEqual(milk_after, milk_before - 1)
+        self.assertEqual(ramesh_after, ramesh_before + milk["price"])
 
 if __name__ == "__main__":
     unittest.main()

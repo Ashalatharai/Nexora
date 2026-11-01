@@ -299,11 +299,30 @@ function Customers() {
   const [query, setQuery] = useState("");
   const [showAdd, setShowAdd] = useState(false);
   const filtered = data.customers.filter((customer) => customer.name.toLowerCase().includes(query.toLowerCase()) || customer.phone.includes(query));
-  const addCustomer = (event) => {
-    event.preventDefault(); const form = new FormData(event.currentTarget); const name = form.get("name");
-    const initials = name.trim().split(/\s+/).slice(0, 2).map((word) => word[0]).join("").toUpperCase();
-    const customer = { id: `c${Date.now()}`, name, phone: form.get("phone"), due: 0, lastActive: "Just now", initials, color: "mint" };
-    setData((current) => ({ ...current, customers: [customer, ...current.customers] })); setShowAdd(false);
+  const addCustomer = async (event) => {
+    event.preventDefault(); const form = new FormData(event.currentTarget); const name = form.get("name")?.trim();
+    const phone = form.get("phone")?.trim() || "";
+    if (!name) return;
+
+    try {
+      const res = await apiCall('/customers', {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name, phone })
+      });
+      if (res && res.store_state) {
+        setData((current) => ({
+          ...current,
+          customers: res.store_state.customers || current.customers,
+          transactions: res.store_state.transactions || current.transactions,
+        }));
+      }
+    } catch {
+      const initials = name.split(/\s+/).slice(0, 2).map((word) => word[0]).join("").toUpperCase();
+      const customer = { id: `c${Date.now()}`, name, phone, due: 0, lastActive: "Just now", initials, color: "mint" };
+      setData((current) => ({ ...current, customers: [customer, ...current.customers] }));
+    }
+    setShowAdd(false);
   };
   return <div><PageIntro eyebrow="YOUR COMMUNITY" title="Customers" description="Good relationships make a good business. Keep them close." action={<Button icon={Plus} onClick={() => setShowAdd(true)}>Add customer</Button>} /><div className="customer-summary"><div className="summary-mini"><span className="summary-icon tone-green"><Users size={17} /></span><span><small>All customers</small><strong>{data.customers.length}</strong></span></div><div className="summary-mini"><span className="summary-icon tone-amber"><Wallet size={17} /></span><span><small>With outstanding Udhaar</small><strong>{data.customers.filter((item) => item.due > 0).length}</strong></span></div><div className="summary-mini"><span className="summary-icon tone-blue"><IndianRupee size={17} /></span><span><small>Total to collect</small><strong>{money(data.customers.reduce((sum, item) => sum + item.due, 0))}</strong></span></div></div>
     <section className="panel table-panel"><div className="table-toolbar"><label className="table-search"><Search size={16} /><input placeholder="Search customers..." value={query} onChange={(event) => setQuery(event.target.value)} /></label><button className="select-button"><ListFilter size={14} /> Filters</button></div><div className="table-scroll"><table><thead><tr><th>CUSTOMER</th><th>PHONE</th><th>OUTSTANDING</th><th>LAST ACTIVE</th><th /></tr></thead><tbody>{filtered.map((customer) => <tr key={customer.id} className="clickable-row" onClick={() => window.location.assign(`/customers/${customer.id}`)}><td><div className="customer-cell"><span className={`customer-avatar avatar-${customer.color}`}>{customer.initials}</span><strong>{customer.name}</strong></div></td><td className="muted-cell">{customer.phone}</td><td className={customer.due ? "due-value" : "muted-cell"}>{customer.due ? money(customer.due) : "All settled"}</td><td className="muted-cell">{customer.lastActive}</td><td><button className="row-more" aria-label="More options"><Ellipsis size={18} /></button></td></tr>)}</tbody></table></div><div className="table-footer"><span>Showing <strong>{filtered.length}</strong> customers</span></div></section>
@@ -318,10 +337,27 @@ function CustomerDetail() {
   const [payment, setPayment] = useState(false);
   const [amount, setAmount] = useState("");
   if (!customer) return <EmptyState title="Customer not found" message="This customer may have been removed." />;
-  const pay = (event) => {
+  const pay = async (event) => {
     event.preventDefault(); const paid = Number(amount); if (paid <= 0) return;
-    setData((current) => ({ ...current, customers: current.customers.map((item) => item.id === id ? { ...item, due: Math.max(0, item.due - paid) } : item) }));
-    addTransaction({ customerId: id, title: "Udhaar payment received", detail: `${customer.name} · Cash`, amount: paid, type: "payment" }); setPayment(false); setAmount("");
+    try {
+      const res = await apiCall('/transactions/payment', {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ customer_id: id, amount: paid, notes: "Direct customer payment" })
+      });
+      if (res && res.store_state) {
+        setData((current) => ({
+          ...current,
+          customers: res.store_state.customers || current.customers,
+          transactions: res.store_state.transactions || current.transactions,
+          totalUdhaar: res.store_state.totalUdhaar ?? current.totalUdhaar,
+        }));
+      }
+    } catch {
+      setData((current) => ({ ...current, customers: current.customers.map((item) => item.id === id ? { ...item, due: Math.max(0, item.due - paid) } : item) }));
+      addTransaction({ customerId: id, title: "Udhaar payment received", detail: `${customer.name} · Cash`, amount: paid, type: "payment" });
+    }
+    setPayment(false); setAmount("");
   };
   const records = data.transactions.filter((item) => item.customerId === id);
   return <div><Link className="back-link" to="/customers"><ArrowLeft size={15} /> Back to customers</Link><div className="customer-profile-hero panel"><span className={`customer-avatar customer-avatar-xl avatar-${customer.color}`}>{customer.initials}</span><div className="customer-hero-copy"><h1>{customer.name}</h1><p>{customer.phone} <span>·</span> Customer since January 2025</p></div><Button icon={IndianRupee} variant="secondary" onClick={() => setPayment(true)}>Record payment</Button></div><div className="detail-grid customer-detail-grid"><section className="panel udhaar-balance-card"><span>OUTSTANDING BALANCE</span><strong>{money(customer.due)}</strong><p>{customer.due ? "A gentle reminder goes a long way." : "All settled up — what a lovely customer."}</p><Link to="/udhaar" className="text-link">View Udhaar book <ArrowRight size={14} /></Link></section><section className="panel"><div className="panel-heading"><div><h2>Recent activity</h2><p>Transactions for {customer.name.split(" ")[0]}</p></div></div>{records.length ? <TransactionList transactions={records} /> : <div className="activity-empty"><strong>No activity yet</strong><span>Transactions with this customer will appear here.</span></div>}</section></div>{payment && <Modal title="Record a payment" onClose={() => setPayment(false)}><form className="form-grid" onSubmit={pay}><p className="full-field modal-copy">Record a payment from <strong>{customer.name}</strong>. They owe {money(customer.due)}.</p><label className="form-field full-field">Amount received<input type="number" min="1" max={customer.due} value={amount} onChange={(event) => setAmount(event.target.value)} required placeholder="₹ 0.00" /></label><div className="form-actions full-field"><Button variant="secondary" onClick={() => setPayment(false)}>Cancel</Button><Button type="submit">Record payment</Button></div></form></Modal>}</div>;
@@ -479,13 +515,15 @@ function Assistant() {
           reply = `Insufficient Stock: Only ${found.stock} ${found.name} ${found.unit}(s) are available, but you requested ${count}. No credit transaction was recorded.`;
         } else {
           const total = found ? found.price * count : count;
+          const newDue = foundCust.due + total;
           setData(current => ({
             ...current,
-            customers: current.customers.map(c => c.id === foundCust.id ? { ...c, due: c.due + total } : c)
+            customers: current.customers.map(c => c.id === foundCust.id ? { ...c, due: newDue } : c)
           }));
-          if (found) updateProduct(found.id, item => ({ ...item, stock: Math.max(0, item.stock - count) }));
+          const remainingStock = found ? Math.max(0, found.stock - count) : 0;
+          if (found) updateProduct(found.id, item => ({ ...item, stock: remainingStock }));
           addTransaction({ customerId: foundCust.id, title: "Udhaar added", detail: `${foundCust.name} · ${count} ${found?.name || "items"}`, amount: total, type: "credit" });
-          reply = `Recorded ${money(total)} on credit for ${foundCust.name}${found ? ` for ${count} ${found.name}` : ""}. Their total Udhaar is now ${money(foundCust.due + total)}.`;
+          reply = `Recorded Udhaar purchase: ${count} ${found?.unit || "item"}(s) of ${found?.name || "items"} for ${foundCust.name} (Total: ${money(total)} | Payment: Udhaar | Stock remaining: ${remainingStock} | Updated Udhaar balance: ${money(newDue)}).`;
         }
       } else if (/(paid|payment|settled|repaid)/.test(lower)) {
         const foundCust = data.customers.find(c => lower.includes(c.name.toLowerCase().split(" ")[0]));
@@ -495,13 +533,18 @@ function Assistant() {
           reply = "Who made the payment? Please specify the customer name (e.g. 'Deeksha paid 100').";
         } else if (paid <= 0) {
           reply = `How much did ${foundCust.name} pay? Please specify the amount (e.g. '${foundCust.name} paid 100').`;
+        } else if (foundCust.due <= 0) {
+          reply = `Payment not recorded: ${foundCust.name} has no outstanding Udhaar balance (${money(0)}).`;
+        } else if (paid > foundCust.due) {
+          reply = `Payment not recorded: Payment amount (${money(paid)}) exceeds ${foundCust.name}'s outstanding Udhaar balance of ${money(foundCust.due)}.`;
         } else {
+          const newDue = Math.max(0, foundCust.due - paid);
           setData(current => ({
             ...current,
-            customers: current.customers.map(c => c.id === foundCust.id ? { ...c, due: Math.max(0, c.due - paid) } : c)
+            customers: current.customers.map(c => c.id === foundCust.id ? { ...c, due: newDue } : c)
           }));
           addTransaction({ customerId: foundCust.id, title: "Udhaar payment received", detail: `${foundCust.name} · Cash/UPI`, amount: paid, type: "payment" });
-          reply = `Payment noted! ${foundCust.name} paid ${money(paid)}. Remaining balance: ${money(Math.max(0, foundCust.due - paid))}.`;
+          reply = `Payment recorded! ${foundCust.name} paid ${money(paid)} in Cash. Updated Udhaar balance: ${money(newDue)} (Inventory unchanged).`;
         }
       } else if (/(took|takes|taken)/.test(lower) && !/(credit|udhaar|cash|paid)/.test(lower)) {
         const foundCust = data.customers.find(c => lower.includes(c.name.toLowerCase().split(" ")[0]));
@@ -520,9 +563,12 @@ function Assistant() {
           reply = `Insufficient Stock: Only ${found.stock} ${found.name} ${found.unit}(s) are available, but you requested ${count}. No sale was recorded.`;
         } else {
           const total = found.price * count;
-          updateProduct(found.id, item => ({ ...item, stock: Math.max(0, item.stock - count) }));
+          const remainingStock = Math.max(0, found.stock - count);
+          updateProduct(found.id, item => ({ ...item, stock: remainingStock }));
           addTransaction({ title: `${found.name} sold`, detail: `${count} ${found.unit}s · Cash sale${foundCust ? ` (${foundCust.name})` : ""}`, amount: total, type: "sale" });
-          reply = `Recorded sale of ${count} ${found.unit}(s) of ${found.name}${foundCust ? ` to ${foundCust.name}` : ""} (${money(total)}). Remaining stock: ${found.stock - count}.`;
+          const custInfo = foundCust ? ` to ${foundCust.name}` : "";
+          const balInfo = foundCust ? ` | Credit balance: ${money(foundCust.due)} unchanged` : "";
+          reply = `Recorded Cash sale of ${count} ${found.unit}(s) of ${found.name}${custInfo} (Total: ${money(total)} | Payment: Cash | Stock remaining: ${remainingStock}${balInfo}).`;
         }
       } else {
         reply = "I couldn't quite understand that transaction. You can record sales (e.g. 'Deeksha bought 2 Maggi'), credit (e.g. 'Deeksha took 2 Maggi on credit'), payments (e.g. 'Deeksha paid 100'), add stock (e.g. 'Add 10 Maggi packets to stock'), or ask about sales and stock.";
