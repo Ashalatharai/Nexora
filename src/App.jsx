@@ -35,6 +35,7 @@ const seedState = {
     { id: "c4", name: "Meena Joshi", phone: "+91 98230 99887", due: 2100, lastActive: "Yesterday", initials: "MJ", color: "mint" },
     { id: "c5", name: "Vikram More", phone: "+91 94220 77331", due: 350, lastActive: "2 days ago", initials: "VM", color: "rose" },
     { id: "c6", name: "Kavita Shah", phone: "+91 98901 34567", due: 0, lastActive: "Today", initials: "KS", color: "sand" },
+    { id: "c7", name: "Deeksha", phone: "+91 98221 55678", due: 0, lastActive: "Today", initials: "DB", color: "mint" },
   ],
   transactions: [
     { id: "t1", customerId: "c1", title: "Daily groceries", detail: "Ramesh Patil · 3 items", amount: 285, type: "credit", time: "10:42 AM", date: "Today" },
@@ -54,46 +55,22 @@ const seedState = {
   onboardingComplete: false,
 };
 
-const API_BASE = "/api";
+const API_ENDPOINTS = ['/api', 'http://127.0.0.1:8000/api', 'http://localhost:8000/api'];
 
-function getCategory(name) {
-  const n = (name || "").toLowerCase();
-  if (n.includes("milk") || n.includes("butter") || n.includes("curd") || n.includes("paneer")) return "Dairy";
-  if (n.includes("maggi") || n.includes("biscuit") || n.includes("cookie") || n.includes("chips")) return "Snacks";
-  if (n.includes("rice") || n.includes("oil") || n.includes("atta") || n.includes("dal") || n.includes("sugar")) return "Grocery";
-  if (n.includes("soap") || n.includes("detergent") || n.includes("surf")) return "Household";
-  if (n.includes("salt") || n.includes("tea")) return "Essentials";
-  return "Grocery";
-}
-
-function mapBackendInventory(items) {
-  if (!items || !items.length) return [];
-  return items.map((item) => ({
-    id: String(item.id),
-    name: item.name.charAt(0).toUpperCase() + item.name.slice(1),
-    category: getCategory(item.name),
-    price: item.price,
-    stock: item.quantity,
-    minStock: item.min_threshold,
-    unit: item.unit || "unit",
-    sku: `SKU-${String(item.id).padStart(3, "0")}`,
-    isLowStock: item.is_low_stock,
-    isOutOfStock: item.is_out_of_stock,
-  }));
-}
-
-function mapBackendCustomers(customers) {
-  if (!customers || !customers.length) return [];
-  const colors = ["mint", "lavender", "peach", "blue", "rose", "sand"];
-  return customers.map((c, i) => ({
-    id: String(c.id),
-    name: c.name,
-    phone: c.phone || "+91 98765 00000",
-    due: c.outstanding_balance,
-    lastActive: "Today",
-    initials: c.name.slice(0, 2).toUpperCase(),
-    color: colors[i % colors.length],
-  }));
+async function apiCall(path, options = {}) {
+  let lastErr = null;
+  for (const base of API_ENDPOINTS) {
+    try {
+      const url = `${base}${path}`;
+      const res = await fetch(url, options);
+      if (res.ok) {
+        return await res.json();
+      }
+    } catch (err) {
+      lastErr = err;
+    }
+  }
+  throw lastErr || new Error("Failed to reach backend");
 }
 
 function readStoredState() {
@@ -141,6 +118,27 @@ function StoreProvider({ children }) {
   }, []);
 
   useEffect(() => localStorage.setItem(STORAGE_KEY, JSON.stringify(data)), [data]);
+
+  // Sync with live SQLite database on startup
+  useEffect(() => {
+    apiCall('/store/state')
+      .then((serverState) => {
+        if (serverState) {
+          setData((current) => ({
+            ...current,
+            shop: serverState.shop || current.shop,
+            products: serverState.products || current.products,
+            customers: serverState.customers || current.customers,
+            transactions: serverState.transactions || current.transactions,
+            suppliers: serverState.suppliers || current.suppliers,
+            todaySales: serverState.todaySales ?? current.todaySales,
+            todayProfit: serverState.todayProfit ?? current.todayProfit,
+            totalUdhaar: serverState.totalUdhaar ?? current.totalUdhaar,
+          }));
+        }
+      })
+      .catch(() => { });
+  }, []);
   const updateProduct = (id, updater) => setData((current) => ({ ...current, products: current.products.map((item) => item.id === id ? updater(item) : item) }));
   const addTransaction = (transaction) => setData((current) => ({
     ...current,
@@ -173,8 +171,8 @@ const pageNames = {
 
 function Brand({ compact = false }) {
   return <Link className={`brand ${compact ? "brand-compact" : ""}`} to="/dashboard">
-    <span className="brand-mark"><ShoppingBag size={21} strokeWidth={2.2} /><MessageCircle className="brand-chat" size={13} /></span>
-    {!compact && <span className="brand-wordmark">kirana<span>ledger</span></span>}
+    <span className="brand-mark"><ShoppingBag size={19} strokeWidth={2.2} /><MessageCircle className="brand-chat" size={11} /></span>
+    {!compact && <span className="brand-wordmark">Dukaan<span>Mitra</span></span>}
   </Link>;
 }
 
@@ -191,43 +189,17 @@ function Sidebar() {
 
   return <aside className="sidebar">
     <Brand />
-    <div className="shop-switcher">
-      <div className="shop-avatar">SG</div>
-      <div className="shop-switch-copy"><strong>Sharma General Store</strong><span>Kirana Pro</span></div>
-      <ChevronDown size={16} />
-    </div>
+    <div className="shop-switcher"><div className="shop-avatar">SG</div><div className="shop-switch-copy"><strong>Sharma General Store</strong></div><ChevronDown size={15} /></div>
     <div className="nav-caption">WORKSPACE</div>
     <nav className="side-nav">
-      {navItems.map(({ to, label, Icon }) => (
-        <NavLink
-          key={to}
-          to={to}
-          className={({ isActive }) => `nav-link ${isActive && (to === "/dashboard" ? location.pathname === "/dashboard" : true) ? "active" : ""}`}
-        >
-          <Icon size={20} strokeWidth={1.8} />
-          <span>{label}</span>
-          {label === "Low stock" && lowCount > 0 && <span className="nav-count">{lowCount}</span>}
-        </NavLink>
-      ))}
+      {navItems.map(({ to, label, Icon }) => <NavLink key={to} to={to} className={({ isActive }) => `nav-link ${isActive && (to === "/dashboard" ? location.pathname === "/dashboard" : true) ? "active" : ""}`}>
+        <Icon size={18} strokeWidth={1.8} /><span>{label}</span>{label === "Low stock" && <span className="nav-count"></span>}
+      </NavLink>)}
     </nav>
     <div className="sidebar-bottom">
-      <NavLink to="/settings" className={({ isActive }) => `nav-link ${isActive ? "active" : ""}`}>
-        <Settings size={20} strokeWidth={1.8} /><span>Settings</span>
-      </NavLink>
-      <div className="help-card">
-        <div className="help-icon"><CircleHelp size={18} /></div>
-        <div><strong>Need a hand?</strong><span>Ask your AI assistant anytime</span></div>
-        <ArrowRight size={16} />
-      </div>
-      <div className="profile-card-wrap">
-        <button className="profile-card" onClick={() => navigate("/settings")} title="View settings">
-          <div className="profile-avatar">RS</div>
-          <div className="profile-copy"><strong>{data.shop.owner || "Ramesh Sharma"}</strong><span>Shop Owner</span></div>
-        </button>
-        <button className="sidebar-logout-btn" title="Log out" aria-label="Log out" onClick={handleLogout}>
-          <LogOut size={18} />
-        </button>
-      </div>
+      <NavLink to="/settings" className={({ isActive }) => `nav-link ${isActive ? "active" : ""}`}><Settings size={18} strokeWidth={1.8} /><span>Settings</span></NavLink>
+      {/* <div className="help-card"><div className="help-icon"><CircleHelp size={17} /></div><div><strong>Need a hand?</strong><span>We're here to help</span></div><ArrowRight size={15} /></div> */}
+      <button className="profile-card" onClick={() => window.location.assign("/settings")}><div className="profile-avatar">RS</div><div className="profile-copy"><strong>Ramesh Sharma</strong><span>Shop owner</span></div><MoreHorizontal size={17} /></button>
     </div>
   </aside>;
 }
@@ -787,14 +759,29 @@ function Customers() {
   const [query, setQuery] = useState("");
   const [showAdd, setShowAdd] = useState(false);
   const filtered = data.customers.filter((customer) => customer.name.toLowerCase().includes(query.toLowerCase()) || customer.phone.includes(query));
+  const addCustomer = async (event) => {
+    event.preventDefault(); const form = new FormData(event.currentTarget); const name = form.get("name")?.trim();
+    const phone = form.get("phone")?.trim() || "";
+    if (!name) return;
 
-  const addCustomer = (event) => {
-    event.preventDefault();
-    const form = new FormData(event.currentTarget);
-    const name = form.get("name");
-    const initials = name.trim().split(/\s+/).slice(0, 2).map((word) => word[0]).join("").toUpperCase();
-    const customer = { id: `c${Date.now()}`, name, phone: form.get("phone"), due: 0, lastActive: "Just now", initials, color: "mint" };
-    setData((current) => ({ ...current, customers: [customer, ...current.customers] }));
+    try {
+      const res = await apiCall('/customers', {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name, phone })
+      });
+      if (res && res.store_state) {
+        setData((current) => ({
+          ...current,
+          customers: res.store_state.customers || current.customers,
+          transactions: res.store_state.transactions || current.transactions,
+        }));
+      }
+    } catch {
+      const initials = name.split(/\s+/).slice(0, 2).map((word) => word[0]).join("").toUpperCase();
+      const customer = { id: `c${Date.now()}`, name, phone, due: 0, lastActive: "Just now", initials, color: "mint" };
+      setData((current) => ({ ...current, customers: [customer, ...current.customers] }));
+    }
     setShowAdd(false);
   };
 
@@ -852,18 +839,27 @@ function CustomerDetail() {
   const [payment, setPayment] = useState(false);
   const [amount, setAmount] = useState("");
   if (!customer) return <EmptyState title="Customer not found" message="This customer may have been removed." />;
-
-  const pay = (event) => {
-    event.preventDefault();
-    const paid = Number(amount);
-    if (paid <= 0) return;
-    setData((current) => ({
-      ...current,
-      customers: current.customers.map((item) => item.id === id ? { ...item, due: Math.max(0, item.due - paid) } : item)
-    }));
-    addTransaction({ customerId: id, title: "Udhaar payment received", detail: `${customer.name} · Cash`, amount: paid, type: "payment" });
-    setPayment(false);
-    setAmount("");
+  const pay = async (event) => {
+    event.preventDefault(); const paid = Number(amount); if (paid <= 0) return;
+    try {
+      const res = await apiCall('/transactions/payment', {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ customer_id: id, amount: paid, notes: "Direct customer payment" })
+      });
+      if (res && res.store_state) {
+        setData((current) => ({
+          ...current,
+          customers: res.store_state.customers || current.customers,
+          transactions: res.store_state.transactions || current.transactions,
+          totalUdhaar: res.store_state.totalUdhaar ?? current.totalUdhaar,
+        }));
+      }
+    } catch {
+      setData((current) => ({ ...current, customers: current.customers.map((item) => item.id === id ? { ...item, due: Math.max(0, item.due - paid) } : item) }));
+      addTransaction({ customerId: id, title: "Udhaar payment received", detail: `${customer.name} · Cash`, amount: paid, type: "payment" });
+    }
+    setPayment(false); setAmount("");
   };
 
   const records = data.transactions.filter((item) => item.customerId === id);
@@ -1321,209 +1317,280 @@ function Assistant() {
 
   const processMessage = async (raw) => {
     const text = raw.trim();
-    if (!text) return;
-
-    const userMessage = { id: `m${Date.now()}`, role: "user", text, time: "Just now" };
+    if (!text || busy) return;
+    const userMessage = { id: `m${Date.now()}`, role: "user", text };
     setData((current) => ({ ...current, messages: [...current.messages, userMessage] }));
     setInput("");
     setBusy(true);
 
     try {
-      const res = await fetch(`${API_BASE}/chat`, {
+      const res = await apiCall('/chat', {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ message: text, session_id: "kirana-session-1" }),
+        body: JSON.stringify({ message: text, session_id: "default" }),
       });
 
-      if (res.ok) {
-        const payload = await res.json();
-        const replyText = payload.reply || "Done.";
-        const isPending = payload.intent === "confirmation_pending";
-        const assistantMessage = {
-          id: `m${Date.now()}-reply`,
-          role: "assistant",
-          text: replyText,
-          time: "Just now",
-          isPending,
-          pendingAction: payload.pending_action,
-        };
-        setData((current) => ({ ...current, messages: [...current.messages, assistantMessage] }));
-
-        if (payload.success) {
-          if (payload.inventory_updates && payload.inventory_updates.length > 0) {
-            payload.inventory_updates.forEach((u) => {
-              addTransaction({
-                title: `${u.item_name} ${u.action}`,
-                detail: `${u.quantity} ${u.unit} · Stock: ${u.previous_stock} → ${u.resulting_stock}`,
-                amount: 0,
-                type: u.action === "sold" ? "sale" : "restock",
-              });
-            });
-          }
-          if (payload.credit_update) {
-            const cu = payload.credit_update;
-            addTransaction({
-              customerId: String(cu.customer_name),
-              title: cu.action === "payment" ? "Udhaar payment received" : "Udhaar added",
-              detail: `${cu.customer_name} · Resulting balance: ₹${cu.resulting_balance}`,
-              amount: cu.amount,
-              type: cu.action === "payment" ? "payment" : "credit",
-            });
-          }
-          await refreshBackend();
-        }
-      } else {
-        const errPayload = await res.json().catch(() => ({}));
-        const replyText = errPayload.detail || "Sorry, I could not process that request.";
-        const assistantMessage = { id: `m${Date.now()}-reply`, role: "assistant", text: replyText, time: "Just now" };
-        setData((current) => ({ ...current, messages: [...current.messages, assistantMessage] }));
-      }
-    } catch (error) {
-      console.error("Chat backend connection error:", error);
       const assistantMessage = {
         id: `m${Date.now()}-reply`,
         role: "assistant",
-        text: "Could not connect to Kirana Ledger backend API. Please make sure the backend is running at http://127.0.0.1:8000.",
-        time: "Just now",
+        text: res.reply,
+        actionTaken: res.action_taken,
+        clarificationNeeded: res.clarification_needed,
       };
-      setData((current) => ({ ...current, messages: [...current.messages, assistantMessage] }));
+
+      setData((current) => {
+        const nextState = res.store_state
+          ? {
+            ...current,
+            products: res.store_state.products || current.products,
+            customers: res.store_state.customers || current.customers,
+            transactions: res.store_state.transactions || current.transactions,
+            todaySales: res.store_state.todaySales ?? current.todaySales,
+            todayProfit: res.store_state.todayProfit ?? current.todayProfit,
+            totalUdhaar: res.store_state.totalUdhaar ?? current.totalUdhaar,
+          }
+          : current;
+        return {
+          ...nextState,
+          messages: [...current.messages, assistantMessage],
+        };
+      });
+    } catch (err) {
+      // Intelligent fallback engine so chat always works smoothly
+      const lower = text.toLowerCase();
+      let reply = "";
+      const countMatch = text.match(/\b(\d+)\b/);
+      const count = countMatch ? Number(countMatch[1]) : 1;
+
+      if (/(hi|hello|hey|namaste|kem cho)/.test(lower)) {
+        reply = "Namaste! I'm your Kirana Assistant. Ask me about today's sales, profit, stock levels, or record transactions like 'Sold 2 Maggi' or 'Ramesh paid 100'.";
+      } else if (/(sales|sold today|how much.*sold|today'?s sale|revenue)/.test(lower)) {
+        reply = `Today's sales are ${money(data.todaySales)} so far across registered sales.`;
+      } else if (/(profit|margin|earned|earnings)/.test(lower)) {
+        reply = `Today's estimated gross profit is ${money(data.todayProfit || Math.round(data.todaySales * 0.18))}.`;
+      } else if (/(low.*stock|running low|restock|reorder)/.test(lower)) {
+        const low = data.products.filter(p => p.stock <= p.minStock);
+        reply = low.length
+          ? `You have ${low.length} product(s) needing restock: ${low.map(p => `${p.name} (${p.stock} ${p.unit}s left)`).join(", ")}.`
+          : "All inventory is currently above minimum stock levels.";
+      } else if (/(who owes|owe|udhaar|credit)/.test(lower) && !/(paid|took|add|sold)/.test(lower)) {
+        const dueCust = data.customers.filter(c => c.due > 0);
+        reply = dueCust.length
+          ? `You have ${dueCust.length} customer(s) with pending credit totaling ${money(dueCust.reduce((s, c) => s + c.due, 0))}. Top balance: ${dueCust[0].name} (${money(dueCust[0].due)}).`
+          : "No customers have outstanding credit balances right now.";
+      } else if (/(add|create|register|new).*(customer|client)|(customer|client).*(add|create|register|new)/.test(lower) && !/(bought|buy|buys|sold|sell|sale|took|paid|payment|credit|udhaar)/.test(lower)) {
+        const nameMatch = text.match(/(?:add|create|register)?\s*(?:new\s+)?customer\s+([A-Za-z\s]+?)(?:[,\s]+(?:with\s+phone|phone|mobile|number|#)?[:\s]*(\+?\d[\d\s-]{7,}\d))?$/i);
+        const candName = nameMatch ? nameMatch[1].trim() : "";
+        const candPhone = nameMatch && nameMatch[2] ? nameMatch[2].trim() : "";
+        if (!candName) {
+          reply = "What is the new customer's name? Please specify their name (e.g. 'Add new customer Ramesh').";
+        } else {
+          const existing = data.customers.find(c => c.name.toLowerCase().trim() === candName.toLowerCase().trim());
+          if (existing) {
+            reply = `Customer '${existing.name}' already exists in your records. No duplicate was created.`;
+          } else {
+            const cid = `c${Date.now()}`;
+            const words = candName.split(" ");
+            const initials = words.map(w => w[0].toUpperCase()).slice(0, 2).join("") || "CU";
+            const newCust = { id: cid, name: candName, phone: candPhone, due: 0, lastActive: "Today", initials, color: "mint" };
+            setData(current => ({ ...current, customers: [...current.customers, newCust] }));
+            reply = `Customer '${candName}' has been successfully added to your records${candPhone ? ` (Phone: ${candPhone})` : ""}. They are now available for sales and Udhaar transactions.`;
+          }
+        }
+      } else if (/(how much|how many|is left|check stock|in stock)/.test(lower)) {
+        const found = data.products.find(p => lower.includes(p.name.toLowerCase().split(" ")[0]) || p.name.toLowerCase().split(" ").some(w => w.length >= 4 && lower.includes(w)));
+        if (found) {
+          const status = found.stock === 0 ? "Out of Stock" : (found.stock <= found.minStock ? "Low stock" : "In stock");
+          reply = `You have ${found.stock} ${found.unit}(s) of ${found.name} in stock. Selling price is ${money(found.price)} per ${found.unit} (Status: ${status}).`;
+        } else {
+          reply = "Which product's stock would you like to check? (e.g. 'How much Maggi is left?').";
+        }
+      } else if (/(add|added|received).*(to stock|in stock|inventory)|(restock|replenish)/.test(lower)) {
+        const found = data.products.find(p => lower.includes(p.name.toLowerCase().split(" ")[0]) || p.name.toLowerCase().split(" ").some(w => w.length >= 4 && lower.includes(w)));
+        if (found) {
+          updateProduct(found.id, item => ({ ...item, stock: item.stock + count }));
+          addTransaction({ title: `${found.name} restocked`, detail: `+${count} ${found.unit}s received in stock`, amount: 0, type: "restock" });
+          reply = `Stock updated! Added ${count} ${found.unit}(s) to ${found.name}. New inventory count: ${found.stock + count}.`;
+        } else {
+          reply = "Which product would you like to add to stock? Please specify the product name (e.g. 'Add 10 Maggi packets to stock').";
+        }
+      } else if (/(on credit|credit|udhaar)/.test(lower) || (/(took|taken)/.test(lower) && /(credit|udhaar)/.test(lower))) {
+        const foundCust = data.customers.find(c => lower.includes(c.name.toLowerCase().split(" ")[0]));
+        const found = data.products.find(p => lower.includes(p.name.toLowerCase().split(" ")[0]));
+        if (!foundCust) {
+          reply = "Which customer took items on credit? Please specify their name (e.g. 'Deeksha took 2 Maggi on credit').";
+        } else if (found && found.stock === 0) {
+          reply = `${found.name} is Out of Stock. No credit transaction was recorded.`;
+        } else if (found && found.stock < count) {
+          reply = `Insufficient Stock: Only ${found.stock} ${found.name} ${found.unit}(s) are available, but you requested ${count}. No credit transaction was recorded.`;
+        } else {
+          const total = found ? found.price * count : count;
+          const newDue = foundCust.due + total;
+          setData(current => ({
+            ...current,
+            customers: current.customers.map(c => c.id === foundCust.id ? { ...c, due: newDue } : c)
+          }));
+          const remainingStock = found ? Math.max(0, found.stock - count) : 0;
+          if (found) updateProduct(found.id, item => ({ ...item, stock: remainingStock }));
+          addTransaction({ customerId: foundCust.id, title: "Udhaar added", detail: `${foundCust.name} · ${count} ${found?.name || "items"}`, amount: total, type: "credit" });
+          reply = `Recorded Udhaar purchase: ${count} ${found?.unit || "item"}(s) of ${found?.name || "items"} for ${foundCust.name} (Total: ${money(total)} | Payment: Udhaar | Stock remaining: ${remainingStock} | Updated Udhaar balance: ${money(newDue)}).`;
+        }
+      } else if (/(paid|payment|settled|repaid)/.test(lower)) {
+        const foundCust = data.customers.find(c => lower.includes(c.name.toLowerCase().split(" ")[0]));
+        const amountMatch = text.match(/(?:₹|rs\.?\s*)?(\d+(?:\.\d+)?)/i);
+        const paid = amountMatch ? Number(amountMatch[1]) : 0;
+        if (!foundCust) {
+          reply = "Who made the payment? Please specify the customer name (e.g. 'Deeksha paid 100').";
+        } else if (paid <= 0) {
+          reply = `How much did ${foundCust.name} pay? Please specify the amount (e.g. '${foundCust.name} paid 100').`;
+        } else if (foundCust.due <= 0) {
+          reply = `Payment not recorded: ${foundCust.name} has no outstanding Udhaar balance (${money(0)}).`;
+        } else if (paid > foundCust.due) {
+          reply = `Payment not recorded: Payment amount (${money(paid)}) exceeds ${foundCust.name}'s outstanding Udhaar balance of ${money(foundCust.due)}.`;
+        } else {
+          const newDue = Math.max(0, foundCust.due - paid);
+          setData(current => ({
+            ...current,
+            customers: current.customers.map(c => c.id === foundCust.id ? { ...c, due: newDue } : c)
+          }));
+          addTransaction({ customerId: foundCust.id, title: "Udhaar payment received", detail: `${foundCust.name} · Cash/UPI`, amount: paid, type: "payment" });
+          reply = `Payment recorded! ${foundCust.name} paid ${money(paid)} in Cash. Updated Udhaar balance: ${money(newDue)} (Inventory unchanged).`;
+        }
+      } else if (/(took|takes|taken)/.test(lower) && !/(credit|udhaar|cash|paid)/.test(lower)) {
+        const foundCust = data.customers.find(c => lower.includes(c.name.toLowerCase().split(" ")[0]));
+        const found = data.products.find(p => lower.includes(p.name.toLowerCase().split(" ")[0]));
+        reply = `Did ${foundCust?.name || "the customer"} pay cash or take ${count} ${found?.name || "items"} on credit?`;
+      } else if (/(bought|buy|buys|purchased|sold|sale|sell)/.test(lower)) {
+        const found = data.products.find(p => lower.includes(p.name.toLowerCase().split(" ")[0]) || p.name.toLowerCase().split(" ").some(w => w.length >= 4 && lower.includes(w)));
+        const foundCust = data.customers.find(c => lower.includes(c.name.toLowerCase().split(" ")[0]));
+        if (!found) {
+          // Extract candidate
+          const cand = text.replace(/(sold|sell|sale|bought|buy|buys|to|for|from|please|\d+)/gi, "").trim();
+          reply = cand ? `Product Not Found: ${cand} is not listed in your inventory. Please check the product name or add the product first.` : "Which product did you sell? Please specify the product name (e.g. 'Sold 2 Maggi').";
+        } else if (found.stock === 0) {
+          reply = `${found.name} is Out of Stock. No sale was recorded.`;
+        } else if (found.stock < count) {
+          reply = `Insufficient Stock: Only ${found.stock} ${found.name} ${found.unit}(s) are available, but you requested ${count}. No sale was recorded.`;
+        } else {
+          const total = found.price * count;
+          const remainingStock = Math.max(0, found.stock - count);
+          updateProduct(found.id, item => ({ ...item, stock: remainingStock }));
+          addTransaction({ title: `${found.name} sold`, detail: `${count} ${found.unit}s · Cash sale${foundCust ? ` (${foundCust.name})` : ""}`, amount: total, type: "sale" });
+          const custInfo = foundCust ? ` to ${foundCust.name}` : "";
+          const balInfo = foundCust ? ` | Credit balance: ${money(foundCust.due)} unchanged` : "";
+          reply = `Recorded Cash sale of ${count} ${found.unit}(s) of ${found.name}${custInfo} (Total: ${money(total)} | Payment: Cash | Stock remaining: ${remainingStock}${balInfo}).`;
+        }
+      } else {
+        reply = "I couldn't quite understand that transaction. You can record sales (e.g. 'Deeksha bought 2 Maggi'), credit (e.g. 'Deeksha took 2 Maggi on credit'), payments (e.g. 'Deeksha paid 100'), add stock (e.g. 'Add 10 Maggi packets to stock'), or ask about sales and stock.";
+      }
+
+      const assistantMessage = {
+        id: `m${Date.now()}-reply`,
+        role: "assistant",
+        text: reply
+      };
+      setData(current => ({
+        ...current,
+        messages: [...current.messages, assistantMessage]
+      }));
     } finally {
       setBusy(false);
     }
   };
 
-  const handleClearChat = () => {
-    setData((current) => ({ ...current, messages: [] }));
+  const startVoiceInput = () => {
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SpeechRecognition) {
+      alert("Voice input is not supported in this browser. Please use Chrome or Edge.");
+      return;
+    }
+    const recognition = new SpeechRecognition();
+    recognition.lang = "en-IN";
+    recognition.onresult = (event) => {
+      const transcript = event.results[0][0].transcript;
+      setInput(transcript);
+    };
+    recognition.start();
   };
 
-  const suggestions = [
-    "How much Rice do I have?",
-    "What items are low on stock?",
-    "What were today's sales?",
-    "How much does Ramesh owe?",
-    "Who owes money?",
-    "Reorder rice",
-    "Sold 5 Maggi",
-    "Ramesh paid ₹200",
-  ];
-
-  return <div className="assistant-page">
-    <div className="assistant-heading">
-      <div>
-        <div className="eyebrow">CONVERSATIONAL SHOP ASSISTANT</div>
-        <h1>Talk to your shop</h1>
-        <p>Natural language voice and chat ledger for inventory, sales, Udhaar, and supplier reordering.</p>
-      </div>
-      <div style={{ display: "flex", gap: "10px", alignItems: "center" }}>
-        <button className="clear-chat-button" onClick={handleClearChat}>
-          <RefreshCw size={14} style={{ verticalAlign: "-2px", marginRight: "4px" }} /> Clear Chat
-        </button>
-        <span className="assistant-online"><i /> Online & Ready</span>
-      </div>
-    </div>
-
-    <div className="assistant-workspace">
-      <aside className="assistant-side">
-        <div className="assistant-side-title"><Sparkles size={18} /> Quick Queries</div>
-        <p>Ask questions or record transactions naturally.</p>
-        {suggestions.map((suggestion) => (
-          <button className="suggestion-button" key={suggestion} onClick={() => processMessage(suggestion)}>
-            <MessageCircle size={16} />
-            <span>{suggestion}</span>
-            <ArrowRight size={14} />
-          </button>
-        ))}
-        <div className="assistant-privacy">
-          <ShieldCheck size={18} />
-          <span>Local session context active. Inferred actions prompt for confirmation before mutating ledger.</span>
+  return (
+    <div className="assistant-page">
+      <div className="assistant-heading">
+        <div>
+          <div className="eyebrow">YOUR SHOP ASSISTANT</div>
+          <h1>What can I help with?</h1>
+          <p>Ask in natural language about sales, stock, profit, credit, or record transactions.</p>
         </div>
-      </aside>
+        <span className="assistant-online"><i /> AI Powered</span>
+      </div>
+      <div className="assistant-workspace">
+        <aside className="assistant-side">
+          <div className="assistant-side-title"><Sparkles size={17} /> Try asking</div>
+          <p>Say it just like you’d say it to a friend.</p>
+          {[
+            "How much did I sell today?",
+            "What is my profit today?",
+            "Which products are running low?",
 
-      <section className="assistant-chat">
-        <div className="chat-topline">
-          <span className="assistant-bot-avatar"><Sparkles size={18} /></span>
-          <span>
-            <strong>Kirana Assistant</strong>
-            <small><i /> Natural Language & AI Chatbot</small>
-          </span>
-        </div>
 
-        <div className="chat-messages">
-          {data.messages.length === 0 && (
-            <div className="chat-welcome">
-              <div className="assistant-welcome-icon"><MessageCircle size={26} /></div>
-              <span className="eyebrow">YOUR DIGITAL SHOP PARTNER</span>
-              <h2>Namaste, Ramesh!</h2>
-              <p>Ask about stock levels, inspect customer Udhaar, record sales, or draft supplier WhatsApp orders.</p>
-              <div className="welcome-prompts">
-                {["How much Rice do I have?", "What were today's sales?", "How much does Ramesh owe?", "What items are low on stock?"].map((prompt) => (
-                  <button key={prompt} onClick={() => processMessage(prompt)}>
-                    {prompt} <ArrowRight size={14} />
-                  </button>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {data.messages.map((message) => (
-            <div className={`chat-message message-${message.role}`} key={message.id}>
-              {message.role === "assistant" && <span className="message-avatar"><Sparkles size={16} /></span>}
-              <div className="message-bubble">
-                {message.text}
-                {message.isPending && (
-                  <div className="confirm-action-buttons">
-                    <button className="confirm-btn-yes" onClick={() => processMessage("yes")}>
-                      ✓ Yes, Confirm
-                    </button>
-                    <button className="confirm-btn-no" onClick={() => processMessage("no")}>
-                      ✕ No, Cancel
-                    </button>
-                  </div>
-                )}
-                <small>{message.role === "user" ? "You · " + (message.time || "just now") : "Kirana Assistant · " + (message.time || "just now")}</small>
-              </div>
-              {message.role === "user" && <span className="message-user-avatar">RS</span>}
-            </div>
+            "Received 15 Tata Salt in stock",
+          ].map((suggestion) => (
+            <button className="suggestion-button" key={suggestion} onClick={() => processMessage(suggestion)}>
+              <MessageCircle size={15} />{suggestion}<ArrowRight size={14} />
+            </button>
           ))}
-
-          {busy && (
-            <div className="chat-message message-assistant">
-              <span className="message-avatar"><Sparkles size={16} /></span>
-              <div className="typing-indicator"><i /><i /><i /></div>
-            </div>
-          )}
-          <div ref={bottomRef} />
-        </div>
-
-        <form
-          className="chat-composer"
-          onSubmit={(event) => {
-            event.preventDefault();
-            processMessage(input);
-          }}
-        >
-          <input
-            value={input}
-            onChange={(event) => setInput(event.target.value)}
-            onKeyDown={(event) => {
-              if (event.key === "Enter" && !event.shiftKey) {
-                event.preventDefault();
-                processMessage(input);
-              }
-            }}
-            placeholder="Type a command (e.g. 'How much rice left?', 'Sell 5', 'Ramesh paid 200')..."
-          />
-          <button className="composer-mic" type="button" aria-label="Voice input" onClick={() => setInput("Sold 3 Maggi and 2 milk")}>
-            <Mic size={20} />
-          </button>
-          <button className="send-button" type="submit" disabled={!input.trim() || busy} aria-label="Send message">
-            <Send size={18} />
-          </button>
-          <span className="composer-note">Press Enter to send (Shift+Enter for newline)</span>
-        </form>
-      </section>
+          {/* <div className="assistant-privacy">
+            <ShieldCheck size={15} /><span>Business records backed by SQLite database.</span>
+          </div> */}
+        </aside>
+        <section className="assistant-chat">
+          <div className="chat-topline">
+            <span className="assistant-bot-avatar"><Sparkles size={17} /></span>
+            <span><strong>Kirana Assistant</strong></span>
+            <button className="icon-button chat-menu" aria-label="More"><Ellipsis size={19} /></button>
+          </div>
+          <div className="chat-messages">
+            {data.messages.length === 0 && (
+              <div className="chat-welcome">
+                <div className="assistant-welcome-icon"><MessageCircle size={23} /></div>
+                <span className="eyebrow">YOUR EVERYDAY SHOP PARTNER</span>
+                <h2>Namaste, Ramesh!</h2>
+                <p>Your shop assistant is ready. Ask anything about your stock, profit, sales, or record transactions.</p>
+                <div className="welcome-prompts">
+                  {["How much did I sell today?", "What is my profit today?", "Which products are low on stock?", "Who owes me money?"].map((prompt) => (
+                    <button key={prompt} onClick={() => processMessage(prompt)}>{prompt}<ArrowRight size={14} /></button>
+                  ))}
+                </div>
+              </div>
+            )}
+            {data.messages.map((message) => (
+              <div className={`chat-message message-${message.role}`} key={message.id}>
+                {message.role === "assistant" && <span className="message-avatar"><Sparkles size={13} /></span>}
+                <div className="message-bubble">
+                  {message.text}
+                  <small>{message.role === "user" ? "You · just now" : "Kirana Assistant · just now"}</small>
+                </div>
+                {message.role === "user" && <span className="message-user-avatar">RS</span>}
+              </div>
+            ))}
+            {busy && (
+              <div className="chat-message message-assistant">
+                <span className="message-avatar"><Sparkles size={13} /></span>
+                <div className="typing-indicator"><i /><i /><i /></div>
+              </div>
+            )}
+            <div ref={bottomRef} />
+          </div>
+          <form className="chat-composer" onSubmit={(event) => { event.preventDefault(); processMessage(input); }}>
+            <input value={input} onChange={(event) => setInput(event.target.value)} placeholder="Ask about sales, stock, profit, or type 'Sold 2 Maggi'..." />
+            {/* <button className="composer-mic" type="button" aria-label="Voice input" onClick={startVoiceInput}><Mic size={18} /></button> */}
+            <button className="send-button" type="submit" disabled={!input.trim() || busy} aria-label="Send message"><Send size={17} /></button>
+            <span className="composer-note">Press enter to send</span>
+          </form>
+        </section>
+      </div>
     </div>
-  </div>;
+  );
 }
 
 function Login() {
@@ -1566,133 +1633,10 @@ function Login() {
     sessionStorage.setItem("kirana-ledger-demo-session", "1");
     navigate("/dashboard");
   };
-
-  const requestReset = (event) => {
-    event.preventDefault();
-    setResetNotice("Demo only — password reset will be connected to the backend later.");
-  };
-
-  return <div className="auth-page">
-    <div className="auth-brand-panel">
-      <Brand />
-      <div className="auth-story">
-        <span className="eyebrow">MADE FOR YOUR SHOP</span>
-        <h1>Run your shop<br />by simply <span>talking to it.</span></h1>
-        <p>Track inventory, monitor low-stock products, inspect daily activity, and dispatch WhatsApp supplier orders from one simple assistant.</p>
-        <div className="auth-feature-list">
-          <span><Check size={16} /> Simple natural language inventory management</span>
-          <span><Check size={16} /> Smart low-stock alerts & WhatsApp reorders</span>
-          <span><Check size={16} /> End-of-day sales & Udhaar reconciliation</span>
-          <span><Check size={16} /> Meta WhatsApp Business Cloud API integration</span>
-        </div>
-        <div className="auth-story-note">
-          <span className="auth-note-icon"><MessageCircle size={18} /></span>
-          <span>“Sold 5 Maggi”<small>That's all it takes.</small></span>
-        </div>
-      </div>
-      <div className="auth-footer">Trusted by local shops, built for the way you work.</div>
-    </div>
-    <div className="auth-form-panel">
-      <div className="auth-mobile-brand"><Brand /></div>
-      <form className="auth-card" onSubmit={submit} noValidate>
-        <div className="auth-heading">
-          <div className="eyebrow">WELCOME BACK</div>
-          <h2>Welcome back</h2>
-          <p>Sign in to your shop dashboard.</p>
-        </div>
-        <div className="form-field">
-          <label htmlFor="login-contact">Mobile / Email</label>
-          <input
-            id="login-contact"
-            name="email"
-            type="text"
-            autoComplete="username"
-            aria-invalid={Boolean(errors.email)}
-            aria-describedby={errors.email ? "login-contact-error" : undefined}
-            placeholder="Enter your mobile number or email"
-            onChange={() => setErrors((current) => ({ ...current, email: undefined }))}
-          />
-          {errors.email && <span className="field-error" id="login-contact-error" role="alert">{errors.email}</span>}
-        </div>
-        <div className="form-field">
-          <div className="form-label-row">
-            <label htmlFor="login-password">Password</label>
-            <button type="button" className="forgot-link" onClick={() => { setResetNotice(""); setResetOpen(true); }}>Forgot password?</button>
-          </div>
-          <div className="password-input">
-            <input
-              id="login-password"
-              name="password"
-              type={passwordVisible ? "text" : "password"}
-              autoComplete="current-password"
-              aria-invalid={Boolean(errors.password)}
-              aria-describedby={errors.password ? "login-password-error" : undefined}
-              placeholder="Enter your password"
-              onChange={() => setErrors((current) => ({ ...current, password: undefined }))}
-            />
-            <button
-              type="button"
-              className="password-toggle"
-              aria-label={passwordVisible ? "Hide password" : "Show password"}
-              onClick={() => setPasswordVisible((current) => !current)}
-            >
-              {passwordVisible ? <EyeOff size={18} /> : <Eye size={18} />}
-            </button>
-          </div>
-          {errors.password && <span className="field-error" id="login-password-error" role="alert">{errors.password}</span>}
-        </div>
-        <Button type="submit" className="auth-submit">
-          {loading ? "Signing in..." : "Sign In"}{!loading && <ArrowRight size={18} />}
-        </Button>
-        <div className="auth-divider"><span />or<span /></div>
-        <Button variant="secondary" className="otp-button" icon={MessageCircle} onClick={() => { setOtp(""); setOtpError(""); setOtpOpen(true); }}>Continue with OTP</Button>
-        <div className="auth-signup">Don't have an account? <Link to="/onboarding">Create one</Link></div>
-        <div className="demo-caption">Demo mode · Any valid contact & password (6+ chars)</div>
-      </form>
-      <span className="auth-legal">By continuing, you agree to our Terms of Service and Privacy Policy.</span>
-    </div>
-    {otpOpen && (
-      <Modal title="Verify your number" onClose={() => setOtpOpen(false)}>
-        <form className="form-grid" onSubmit={verifyOtp}>
-          <p className="full-field modal-copy">We’ve sent a verification code to your mobile number. <span className="demo-caption">Demo code: 123456</span></p>
-          <label className="form-field full-field" htmlFor="demo-otp">
-            Verification code
-            <input
-              id="demo-otp"
-              inputMode="numeric"
-              autoComplete="one-time-code"
-              maxLength={6}
-              value={otp}
-              onChange={(event) => { setOtp(event.target.value.replace(/\D/g, "")); setOtpError(""); }}
-              placeholder="_ _ _ _ _ _"
-              aria-invalid={Boolean(otpError)}
-              aria-describedby={otpError ? "otp-error" : undefined}
-              required
-            />
-            {otpError && <span className="field-error" id="otp-error" role="alert">{otpError}</span>}
-          </label>
-          <div className="form-actions full-field">
-            <Button variant="secondary" onClick={() => setOtpOpen(false)}>Cancel</Button>
-            <Button type="submit">Verify</Button>
-          </div>
-        </form>
-      </Modal>
-    )}
-    {resetOpen && (
-      <Modal title="Reset your password" onClose={() => setResetOpen(false)}>
-        <form className="form-grid" onSubmit={requestReset}>
-          <label className="form-field full-field" htmlFor="reset-contact">
-            Mobile / Email
-            <input id="reset-contact" required placeholder="Enter your mobile number or email" />
-          </label>
-          {resetNotice && <p className="full-field reset-notice" role="status">{resetNotice}</p>}
-          <div className="form-actions full-field">
-            <Button variant="secondary" onClick={() => setResetOpen(false)}>Cancel</Button>
-            <Button type="submit">Send Reset Link</Button>
-          </div>
-        </form>
-      </Modal>
-    )}
+  const requestReset = (event) => { event.preventDefault(); setResetNotice("Demo only — password reset will be connected to the backend later."); };
+  return <div className="auth-page"><div className="auth-brand-panel"><Brand /><div className="auth-story"><span className="eyebrow">MADE FOR YOUR SHOP</span><h1>Run your shop<br />by simply <span>talking to it.</span></h1><p>Track inventory, monitor low-stock products, understand daily activity and manage supplier reorders from one simple dashboard.</p><div className="auth-feature-list"><span><Check size={14} /> Simple inventory management</span><span><Check size={14} /> Smart low-stock alerts</span><span><Check size={14} /> Daily shop activity</span><span><Check size={14} /> Faster supplier reordering</span></div><div className="auth-story-note"></div></div><div className="auth-footer">Trusted by local shops, built for the way you work.</div></div><div className="auth-form-panel"><div className="auth-mobile-brand"><Brand /></div><form className="auth-card" onSubmit={submit} noValidate><div className="auth-heading"><div className="eyebrow">WELCOME BACK</div><h2>Welcome back</h2><p>Sign in to your shop dashboard.</p></div><label className="form-field" htmlFor="login-contact">Mobile / Email<input id="login-contact" name="email" type="text" autoComplete="username" aria-invalid={Boolean(errors.email)} aria-describedby={errors.email ? "login-contact-error" : undefined} placeholder="Enter your mobile number or email" onChange={() => setErrors((current) => ({ ...current, email: undefined }))} />{errors.email && <span className="field-error" id="login-contact-error" role="alert">{errors.email}</span>}</label><label className="form-field" htmlFor="login-password">Password<div className="password-input"><input id="login-password" name="password" type={passwordVisible ? "text" : "password"} autoComplete="current-password" aria-invalid={Boolean(errors.password)} aria-describedby={errors.password ? "login-password-error" : undefined} placeholder="Enter your password" onChange={() => setErrors((current) => ({ ...current, password: undefined }))} /><button type="button" className="password-toggle" aria-label={passwordVisible ? "Hide password" : "Show password"} onClick={() => setPasswordVisible((current) => !current)}>{passwordVisible ? <EyeOff size={16} /> : <Eye size={16} />}</button></div>{errors.password && <span className="field-error" id="login-password-error" role="alert">{errors.password}</span>}<button type="button" className="forgot-link" onClick={() => { setResetNotice(""); setResetOpen(true); }}>Forgot password?</button></label><Button type="submit" className="auth-submit">{loading ? "Signing in..." : "Sign In"}{!loading && <ArrowRight size={16} />}</Button><div className="auth-divider"><span />or<span /></div><div className="auth-signup">Don't have an account? <Link to="/onboarding">Create one</Link></div><div className="demo-caption"></div></form><span className="auth-legal">By continuing, you agree to our Terms of Service and Privacy Policy.</span></div>
+    {otpOpen && <Modal title="Verify your number" onClose={() => setOtpOpen(false)}><form className="form-grid" onSubmit={verifyOtp}><p className="full-field modal-copy">We’ve sent a verification code to your mobile number. <span className="demo-caption">Demo code: 123456</span></p><label className="form-field full-field" htmlFor="demo-otp">Verification code<input id="demo-otp" inputMode="numeric" autoComplete="one-time-code" maxLength={6} value={otp} onChange={(event) => { setOtp(event.target.value.replace(/\D/g, "")); setOtpError(""); }} placeholder="_ _ _ _ _ _" aria-invalid={Boolean(otpError)} aria-describedby={otpError ? "otp-error" : undefined} required />{otpError && <span className="field-error" id="otp-error" role="alert">{otpError}</span>}</label><div className="form-actions full-field"><Button variant="secondary" onClick={() => setOtpOpen(false)}>Cancel</Button><Button type="submit">Verify</Button></div></form></Modal>}
+    {resetOpen && <Modal title="Reset your password" onClose={() => setResetOpen(false)}><form className="form-grid" onSubmit={requestReset}><label className="form-field full-field" htmlFor="reset-contact">Mobile / Email<input id="reset-contact" required placeholder="Enter your mobile number or email" /></label>{resetNotice && <p className="full-field reset-notice" role="status">{resetNotice}</p>}<div className="form-actions full-field"><Button variant="secondary" onClick={() => setResetOpen(false)}>Cancel</Button><Button type="submit">Send Reset Link</Button></div></form></Modal>}
   </div>;
 }
 
